@@ -1,6 +1,11 @@
 mod json;
 mod platform;
 
+/// Minimum dimensions for zoomed crop scale-up.
+/// Ensures cropped regions are large enough for vision models to read.
+const ZOOM_MIN_WIDTH: u32 = 640;
+const ZOOM_MIN_HEIGHT: u32 = 480;
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
@@ -155,10 +160,10 @@ fn cell_to_coords(
         let (grid_cols, grid_rows) = if let Some(g) = explicit_grid {
             g
         } else if i > 0 {
-            // Simulate scale-up to 640x480 minimum (matches screenshot behavior)
-            let scaled_w = if (w as u32) < 640 || (h as u32) < 480 {
-                let scale_x = if w > 0.0 { (640.0 / w).ceil() as u32 } else { 1 };
-                let scale_y = if h > 0.0 { (480.0 / h).ceil() as u32 } else { 1 };
+            // Simulate scale-up to minimum dimensions (matches screenshot behavior)
+            let scaled_w = if (w as u32) < ZOOM_MIN_WIDTH || (h as u32) < ZOOM_MIN_HEIGHT {
+                let scale_x = if w > 0.0 { (ZOOM_MIN_WIDTH as f64 / w).ceil() as u32 } else { 1 };
+                let scale_y = if h > 0.0 { (ZOOM_MIN_HEIGHT as f64 / h).ceil() as u32 } else { 1 };
                 let scale = scale_x.max(scale_y).max(1);
                 (w as u32 * scale, h as u32 * scale)
             } else {
@@ -274,7 +279,7 @@ fn cmd_screenshot(args: &[String]) -> Result<String, String> {
 
         // Scale up small crops so content is readable in vision models
         if cell.is_some() {
-            img = platform::png::scale_up(&img, 640, 480);
+            img = platform::png::scale_up(&img, ZOOM_MIN_WIDTH, ZOOM_MIN_HEIGHT);
         }
 
         // Draw grid overlay on the final (possibly cropped and scaled) image
