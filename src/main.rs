@@ -167,16 +167,24 @@ fn cmd_mouse(args: &[String]) -> Result<String, String> {
     let sub_args = &args[1..];
 
     // Extract window flags from the remaining args
-    let (remaining, _) = extract_window_flags(sub_args)?;
+    let (remaining, focused_window_id) = extract_window_flags(sub_args)?;
 
     match subcmd {
         "move" => {
-            let x: i32 = remaining.get(0)
+            let mut x: i32 = remaining.get(0)
                 .ok_or("Usage: gui-tool mouse move <x> <y>")?
                 .parse().map_err(|_| "Invalid x coordinate")?;
-            let y: i32 = remaining.get(1)
+            let mut y: i32 = remaining.get(1)
                 .ok_or("Usage: gui-tool mouse move <x> <y>")?
                 .parse().map_err(|_| "Invalid y coordinate")?;
+
+            // When targeting a window, coords are relative to its top-left
+            if let Some(win_id) = focused_window_id {
+                let (wx, wy) = platform::get_window_position(win_id)?;
+                x += wx;
+                y += wy;
+            }
+
             platform::mouse_move(x, y)
         }
         "click" => {

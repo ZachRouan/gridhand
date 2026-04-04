@@ -145,8 +145,11 @@ gui-tool windows raise 1234567890
 ### Mouse
 
 ```bash
-# Move to absolute coordinates
+# Move to absolute screen coordinates
 gui-tool mouse move 500 300
+
+# Move relative to a window's top-left corner
+gui-tool mouse move 100 200 --window-id 2045481940
 
 # Click
 gui-tool mouse click
@@ -154,8 +157,9 @@ gui-tool mouse click --button right
 
 # Focus a window first, then click (single process, no focus race)
 gui-tool mouse click --window "Firefox"
-gui-tool mouse move 500 300 --window-id 2045481940
 ```
+
+When `--window` or `--window-id` is used with `mouse move`, coordinates are relative to the window — pixel positions from a cropped screenshot map directly to mouse coordinates.
 
 ### Keyboard
 

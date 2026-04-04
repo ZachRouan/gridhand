@@ -119,6 +119,43 @@ fn get_window_list() -> Result<String, String> {
     }
 }
 
+pub fn get_window_position(window_id: u32) -> Result<(i32, i32), String> {
+    unsafe {
+        let list = CGWindowListCopyWindowInfo(
+            kCGWindowListOptionOnScreenOnly,
+            kCGNullWindowID,
+        );
+        if list.is_null() {
+            return Err("Failed to get window list".to_string());
+        }
+
+        let count = CFArrayGetCount(list);
+        for i in 0..count {
+            let dict = CFArrayGetValueAtIndex(list, i);
+            if dict.is_null() { continue; }
+
+            let id_val = CFDictionaryGetValue(dict, kCGWindowNumber);
+            let id = cfnumber_to_i32(id_val).unwrap_or(0) as u32;
+
+            if id == window_id {
+                let bounds_val = CFDictionaryGetValue(dict, kCGWindowBounds);
+                if !bounds_val.is_null() {
+                    let mut rect = CGRect::null();
+                    if CGRectMakeWithDictionaryRepresentation(bounds_val, &mut rect) {
+                        CFRelease(list);
+                        return Ok((rect.origin.x as i32, rect.origin.y as i32));
+                    }
+                }
+                CFRelease(list);
+                return Err(format!("Window {} has no bounds", window_id));
+            }
+        }
+
+        CFRelease(list);
+        Err(format!("Window {} not found", window_id))
+    }
+}
+
 fn get_window_pid(window_id: u32) -> Result<i32, String> {
     unsafe {
         let list = CGWindowListCopyWindowInfo(

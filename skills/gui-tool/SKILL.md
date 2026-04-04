@@ -42,10 +42,15 @@ gui-tool windows raise 1234567
 # Move mouse to absolute screen coordinates
 gui-tool mouse move 500 300
 
+# Move mouse relative to a window's top-left corner
+gui-tool mouse move 100 200 --window-id 2045481940
+
 # Click (default: left)
 gui-tool mouse click
 gui-tool mouse click --button right
 ```
+
+When `--window` or `--window-id` is used with `mouse move`, coordinates are **relative to the window's top-left corner**, not the screen. This eliminates manual offset math.
 
 ### Keyboard
 
@@ -75,6 +80,35 @@ Errors go to stderr as JSON:
 {"status":"error","message":"..."}
 ```
 
+## Coordinate workflow for agents
+
+When you need to click something inside a window, follow this sequence:
+
+### 1. Get the window ID
+```bash
+gui-tool windows list
+```
+Parse the JSON to find the target window's `id` field.
+
+### 2. Take a cropped screenshot
+```bash
+gui-tool screenshot --window-id <id> --output /tmp/target.png
+```
+This gives you an image of **just that window**, cropped to its bounds. Analyze this image to find your click target.
+
+### 3. Click using window-relative coordinates
+```bash
+gui-tool mouse move <x> <y> --window-id <id>
+gui-tool mouse click --window-id <id>
+```
+When `--window-id` is used with `mouse move`, coordinates are **relative to the window's top-left corner**. So if a button appears at pixel (200, 150) in the cropped screenshot, use those exact values — no screen offset math needed.
+
+### Key rules
+- **Always use `--window-id`** for multi-step interactions. It prevents focus race conditions by raising the window in the same process.
+- **Coordinates with `--window-id` are window-relative.** The screenshot you took is already cropped to the window, so pixel positions in the image map directly to mouse coordinates.
+- **Coordinates without `--window-id` are absolute screen positions.** Only use this if you're working with the full desktop.
+- **Prefer `--window-id` over `--window`** when you have the ID. Title matching (`--window`) is fuzzy and may grab the wrong window if multiple have similar titles.
+
 ## Common patterns
 
 **See what's on screen:**
@@ -85,34 +119,20 @@ Then read the screenshot image to see the desktop.
 
 **See a specific window (cropped):**
 ```bash
-gui-tool screenshot --window "Firefox" --output /tmp/firefox.png
-```
-The PNG is cropped to just that window — no need to crop yourself.
-
-**Find and focus a window:**
-```bash
-gui-tool windows list                    # find the ID
-gui-tool windows raise <id>              # bring it to front
-```
-
-**Focus a window and interact (no race condition):**
-```bash
-gui-tool mouse click --window "Firefox"
-gui-tool key type "search query" --window-id 2045481940
 gui-tool screenshot --window-id 2045481940 --output /tmp/app.png
 ```
-Use `--window` for title matching or `--window-id` for exact ID (from `windows list`).
 
-**Click a specific location:**
+**Focus and interact (no race condition):**
 ```bash
-gui-tool mouse move 500 300
-gui-tool mouse click
+gui-tool mouse move 200 150 --window-id 2045481940
+gui-tool mouse click --window-id 2045481940
+gui-tool key type "hello" --window-id 2045481940
 ```
 
-**Select all and copy from focused app:**
+**Select all and copy from a specific window:**
 ```bash
-gui-tool key press "ctrl+a"
-gui-tool key press "ctrl+c"
+gui-tool key press "ctrl+a" --window-id 2045481940
+gui-tool key press "ctrl+c" --window-id 2045481940
 ```
 
 ## Requirements

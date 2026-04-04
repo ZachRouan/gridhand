@@ -125,6 +125,9 @@ extern "C" {
 
     // CGDataProvider
     pub fn CGDataProviderCopyData(provider: *const c_void) -> *mut c_void;
+
+    // CGRect from dictionary (for reading kCGWindowBounds)
+    pub fn CGRectMakeWithDictionaryRepresentation(dict: *const c_void, rect: *mut CGRect) -> bool;
 }
 
 // --- CoreFoundation FFI ---
