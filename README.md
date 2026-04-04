@@ -102,6 +102,10 @@ Zero crates. Zero `extern "C"`. Zero subprocess calls. ~1,700 lines of Rust.
 - window-calls GNOME extension (for window management)
 - XDG Desktop Portal (for screenshots — included in GNOME by default)
 
+## AI Agent Integration
+
+A skill definition is included in `skills/SKILL.md`. Copy it to your AI agent's skill directory to give it automatic access to gui-tool.
+
 ## License
 
 MIT
