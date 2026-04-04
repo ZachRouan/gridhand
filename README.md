@@ -40,13 +40,27 @@ The plugin manifest (`.claude-plugin/plugin.json`) and skill definition (`skills
 
 ### Other agents (Codex, Gemini CLI, etc.)
 
-Add gui-tool to your PATH and reference the skill in your `AGENTS.md` or `GEMINI.md`:
-
+**1. Add gui-tool to your PATH:**
 ```bash
+# Linux/macOS
 sudo ln -s $(pwd)/target/release/gui-tool /usr/local/bin/gui-tool
+
+# Or use ~/.local/bin (no sudo)
+ln -s $(pwd)/target/release/gui-tool ~/.local/bin/gui-tool
 ```
 
-The skill definition is at [`skills/gui-tool/SKILL.md`](skills/gui-tool/SKILL.md).
+**2. Install the skill** (for Claude Code, Codex, Gemini CLI, or any agent supporting the [Agent Skills](https://agentskills.io) standard):
+```bash
+# Claude Code
+mkdir -p ~/.claude/skills/gui-tool
+cp skills/gui-tool/SKILL.md ~/.claude/skills/gui-tool/SKILL.md
+
+# Codex
+mkdir -p ~/.codex/skills/gui-tool
+cp skills/gui-tool/SKILL.md ~/.codex/skills/gui-tool/SKILL.md
+```
+
+The agent will automatically discover gui-tool and use it when it needs to interact with the desktop. You can also reference it in your project's `AGENTS.md` or `GEMINI.md`.
 
 ### Examples
 
