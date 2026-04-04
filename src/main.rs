@@ -83,6 +83,19 @@ fn extract_window_flags(args: &[String]) -> Result<(Vec<String>, Option<(u64, i3
     }
 }
 
+/// Auto-select grid density based on image dimensions.
+/// Larger images get denser grids; smaller (zoomed) images get coarser grids.
+fn auto_grid(width: u32, height: u32) -> (u32, u32) {
+    let min_dim = width.min(height);
+    if min_dim >= 800 {
+        (8, 6)
+    } else if min_dim >= 400 {
+        (4, 3)
+    } else {
+        (3, 2)
+    }
+}
+
 /// Parse a grid density string like "8x6" into (cols, rows).
 fn parse_grid(s: &str) -> Result<(u32, u32), String> {
     let parts: Vec<&str> = s.split('x').collect();
@@ -119,6 +132,8 @@ fn parse_cell_ref(s: &str) -> Result<(u32, u32), String> {
 
 /// Compute absolute screen coordinates from a cell chain like "B2.C1".
 /// Uses f64 throughout to avoid integer division drift.
+/// Auto-scales grid density at each recursion level based on region size.
+/// If `explicit_grid` is Some, uses that fixed density instead of auto-scaling.
 /// Returns the center point of the innermost cell.
 fn cell_to_coords(
     cell_chain: &str,
@@ -126,8 +141,7 @@ fn cell_to_coords(
     bounds_y: i32,
     bounds_w: u32,
     bounds_h: u32,
-    grid_cols: u32,
-    grid_rows: u32,
+    explicit_grid: Option<(u32, u32)>,
 ) -> Result<(i32, i32), String> {
     let mut x = bounds_x as f64;
     let mut y = bounds_y as f64;
@@ -135,6 +149,8 @@ fn cell_to_coords(
     let mut h = bounds_h as f64;
 
     for part in cell_chain.split('.') {
+        let (grid_cols, grid_rows) = explicit_grid
+            .unwrap_or_else(|| auto_grid(w as u32, h as u32));
         let (col, row) = parse_cell_ref(part)?;
         if col >= grid_cols || row >= grid_rows {
             return Err(format!(
@@ -221,11 +237,12 @@ fn cmd_screenshot(args: &[String]) -> Result<String, String> {
     // Post-process: apply cell crop and/or grid overlay
     if cell.is_some() || grid.is_some() {
         let mut img = platform::png::read_png(output)?;
-        let (cols, rows) = grid.unwrap_or((8, 6));
 
         // If --cell is specified, recursively crop through dot-separated refs
         if let Some(cell_chain) = &cell {
             for part in cell_chain.split('.') {
+                // Auto-scale or use explicit grid for this level
+                let (cols, rows) = grid.unwrap_or_else(|| auto_grid(img.width, img.height));
                 let (col, row) = parse_cell_ref(part)?;
                 if col >= cols || row >= rows {
                     return Err(format!("Cell '{}' out of range for {}x{} grid", part, cols, rows));
@@ -239,9 +256,18 @@ fn cmd_screenshot(args: &[String]) -> Result<String, String> {
         }
 
         // Draw grid overlay on the final (possibly cropped) image
-        platform::png::draw_grid(&mut img, cols, rows);
+        let (final_cols, final_rows) = grid.unwrap_or_else(|| auto_grid(img.width, img.height));
+        platform::png::draw_grid(&mut img, final_cols, final_rows);
 
+        // Include grid density in output so agents know what was used
+        let grid_info = format!("{}x{}", final_cols, final_rows);
         platform::png::write_png(output, &img)?;
+
+        // Re-read the original result JSON and append grid info
+        // (The result string was already generated above — we append grid to it)
+        let mut result_with_grid = result.trim_end_matches('}').to_string();
+        result_with_grid.push_str(&format!(",\"grid\":\"{}\"}}", grid_info));
+        return Ok(result_with_grid);
     }
 
     // Print the original JSON result (path, bounds, etc.)
@@ -280,7 +306,7 @@ fn cmd_mouse(args: &[String]) -> Result<String, String> {
     // Extract --cell and --grid from remaining args
     let mut positional = Vec::new();
     let mut cell: Option<String> = None;
-    let mut grid_density: (u32, u32) = (8, 6);
+    let mut explicit_grid: Option<(u32, u32)> = None;
     let mut i = 0;
     while i < remaining.len() {
         match remaining[i].as_str() {
@@ -291,7 +317,7 @@ fn cmd_mouse(args: &[String]) -> Result<String, String> {
             "--grid" => {
                 if let Some(next) = remaining.get(i + 1) {
                     if !next.starts_with('-') && next.contains('x') {
-                        grid_density = parse_grid(next)?;
+                        explicit_grid = Some(parse_grid(next)?);
                         i += 1;
                     }
                 }
@@ -316,7 +342,7 @@ fn cmd_mouse(args: &[String]) -> Result<String, String> {
                 // Cell-based targeting — requires window bounds
                 let (_, wx, wy, ww, wh) = window_info
                     .ok_or("--cell requires --window or --window-id to know the target window")?;
-                let (x, y) = cell_to_coords(cell_ref, wx, wy, ww, wh, grid_density.0, grid_density.1)?;
+                let (x, y) = cell_to_coords(cell_ref, wx, wy, ww, wh, explicit_grid)?;
                 platform::mouse_move(x, y)
             } else {
                 // Coordinate-based targeting
@@ -458,26 +484,42 @@ mod tests {
 
     #[test]
     fn test_cell_to_coords_single() {
-        // 4x3 grid on a 400x300 window at (100, 50)
+        // Explicit 4x3 grid on a 400x300 window at (100, 50)
         // Cell B2 = col 1, row 1 → cell is at (200, 150) size (100, 100) → center (250, 200)
-        let (x, y) = cell_to_coords("B2", 100, 50, 400, 300, 4, 3).unwrap();
+        let (x, y) = cell_to_coords("B2", 100, 50, 400, 300, Some((4, 3))).unwrap();
         assert_eq!(x, 250);
         assert_eq!(y, 200);
     }
 
     #[test]
     fn test_cell_to_coords_recursive() {
-        // 4x3 grid on 400x300 at (0, 0)
+        // Explicit 4x3 grid on 400x300 at (0, 0)
         // B2 = (100, 100) size (100, 100)
         // B2.A1 = within B2: (100, 100) size (25, 33) → center (112, 116)
-        let (x, y) = cell_to_coords("B2.A1", 0, 0, 400, 300, 4, 3).unwrap();
+        let (x, y) = cell_to_coords("B2.A1", 0, 0, 400, 300, Some((4, 3))).unwrap();
         assert_eq!(x, 112);
         assert_eq!(y, 116);
     }
 
     #[test]
     fn test_cell_to_coords_out_of_range() {
-        assert!(cell_to_coords("E1", 0, 0, 400, 300, 4, 3).is_err()); // col 4 >= 4
-        assert!(cell_to_coords("A4", 0, 0, 400, 300, 4, 3).is_err()); // row 3 >= 3
+        assert!(cell_to_coords("E1", 0, 0, 400, 300, Some((4, 3))).is_err()); // col 4 >= 4
+        assert!(cell_to_coords("A4", 0, 0, 400, 300, Some((4, 3))).is_err()); // row 3 >= 3
+    }
+
+    #[test]
+    fn test_auto_grid() {
+        assert_eq!(auto_grid(1280, 800), (8, 6));
+        assert_eq!(auto_grid(320, 267), (3, 2));  // zoomed cell
+        assert_eq!(auto_grid(640, 400), (4, 3));   // medium
+    }
+
+    #[test]
+    fn test_cell_to_coords_auto_grid() {
+        // Auto-scale: 1280x800 → 8x6, cell B2 = col 1, row 1
+        // cell_w = 160.0, cell_h = 133.33, center = (160 + 80, 133.33 + 66.67) = (240, 200)
+        let (x, y) = cell_to_coords("B2", 0, 0, 1280, 800, None).unwrap();
+        assert_eq!(x, 240);
+        assert_eq!(y, 200);
     }
 }
