@@ -20,7 +20,7 @@ pub fn list_windows() -> Result<String, String> {
     let windows_json = ubuf.read_string()?;
 
     Ok(json::success_with(vec![
-        ("windows", JsonValue::OwnedStr(windows_json)),
+        ("windows", JsonValue::RawJson(windows_json)),
     ]))
 }
 

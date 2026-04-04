@@ -46,7 +46,7 @@ pub fn screenshot_window(title: &str, output: &str) -> Result<String, String> {
 
     Ok(json::success_with(vec![
         ("path", JsonValue::Str(output)),
-        ("window", JsonValue::OwnedStr(win_json)),
+        ("window", JsonValue::RawJson(win_json)),
     ]))
 }
 

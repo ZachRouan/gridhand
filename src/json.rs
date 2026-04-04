@@ -7,6 +7,8 @@ pub enum JsonValue<'a> {
     Int(i64),
     Str(&'a str),
     OwnedStr(String),
+    /// Raw JSON string — written verbatim without escaping
+    RawJson(String),
     Array(Vec<JsonValue<'a>>),
     Object(Vec<(&'a str, JsonValue<'a>)>),
 }
@@ -25,6 +27,7 @@ impl<'a> JsonValue<'a> {
             JsonValue::Int(n) => write!(buf, "{}", n).unwrap(),
             JsonValue::Str(s) => write_json_string(buf, s),
             JsonValue::OwnedStr(s) => write_json_string(buf, s),
+            JsonValue::RawJson(s) => buf.push_str(s),
             JsonValue::Array(items) => {
                 buf.push('[');
                 for (i, item) in items.iter().enumerate() {

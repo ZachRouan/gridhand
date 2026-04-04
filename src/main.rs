@@ -107,7 +107,22 @@ fn cmd_mouse(args: &[String]) -> Result<String, String> {
             Err("Platform not supported yet".to_string())
         }
         "click" => {
-            let button = args.get(1).map(|s| s.as_str()).unwrap_or("left");
+            let mut button = "left";
+            let mut i = 1;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--button" => {
+                        i += 1;
+                        button = args.get(i).map(|s| s.as_str())
+                            .unwrap_or("left");
+                    }
+                    other => {
+                        // Also accept positional for convenience
+                        button = other;
+                    }
+                }
+                i += 1;
+            }
             #[cfg(target_os = "linux")]
             { platform::mouse_click(button) }
             #[cfg(not(target_os = "linux"))]
