@@ -227,3 +227,45 @@ fn cmd_key(args: &[String]) -> Result<String, String> {
         _ => Err(format!("Unknown key subcommand: {}", subcmd)),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Test that extract_window_flags can't be tested directly without a running
+    // desktop (it calls platform::raise_window), so we test the parsing logic
+    // by checking the error cases that don't require platform calls.
+
+    #[test]
+    fn test_both_window_flags_error() {
+        let args: Vec<String> = vec![
+            "--window".to_string(), "Firefox".to_string(),
+            "--window-id".to_string(), "123".to_string(),
+        ];
+        let result = extract_window_flags(&args);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Cannot use both"));
+    }
+
+    #[test]
+    fn test_window_id_missing_value() {
+        let args: Vec<String> = vec!["--window-id".to_string()];
+        let result = extract_window_flags(&args);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_window_id_invalid_number() {
+        let args: Vec<String> = vec!["--window-id".to_string(), "notanumber".to_string()];
+        let result = extract_window_flags(&args);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Invalid window ID"));
+    }
+
+    #[test]
+    fn test_window_missing_value() {
+        let args: Vec<String> = vec!["--window".to_string()];
+        let result = extract_window_flags(&args);
+        assert!(result.is_err());
+    }
+}

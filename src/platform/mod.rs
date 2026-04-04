@@ -105,4 +105,42 @@ mod tests {
 
         let _ = std::fs::remove_file(path);
     }
+
+    #[test]
+    #[ignore]
+    fn test_screenshot_window_by_id() {
+        // First get a window ID from list
+        let list_result = list_windows();
+        assert!(list_result.is_ok());
+        let json = list_result.unwrap();
+
+        // Extract first window ID
+        let windows_str = crate::json::extract_json_string(&json, "windows");
+        assert!(windows_str.is_some(), "No windows field in: {}", json);
+        let entries = crate::json::split_json_array(windows_str.unwrap());
+        assert!(!entries.is_empty(), "No windows found");
+        let first_id = crate::json::extract_json_number(entries[0], "id");
+        assert!(first_id.is_some(), "No id in first window");
+
+        let path = "/tmp/gui-tool-test-window-screenshot.png";
+        let _ = std::fs::remove_file(path);
+
+        let result = screenshot_window_by_id(first_id.unwrap() as u64, path);
+        assert!(result.is_ok(), "screenshot_window_by_id failed: {:?}", result.err());
+        assert!(std::path::Path::new(path).exists(), "Screenshot file not created");
+
+        let data = std::fs::read(path).unwrap();
+        assert_eq!(&data[..4], &[0x89, b'P', b'N', b'G'], "Not a valid PNG");
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    #[ignore]
+    fn test_find_window_by_title() {
+        // Should find at least one window on a running desktop
+        let result = find_window_by_title("a");
+        assert!(result.is_ok(), "find_window_by_title failed: {:?}", result.err());
+        // Result may be None if no window matches — that's OK, we just test it doesn't crash
+    }
 }
