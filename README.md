@@ -1,10 +1,12 @@
 # gui-tool
 
-A zero-dependency Rust CLI for programmatic GUI interaction on Linux. Screenshots, window management, mouse control, keyboard input. Designed for AI agents — JSON-in/JSON-out, single binary, no runtime dependencies beyond the OS.
+A zero-dependency Rust CLI for GUI interaction on Linux. Screenshots, window management, mouse control, keyboard input. Use it from the terminal, shell scripts, or as a tool for AI coding agents. JSON-in/JSON-out, single binary, no runtime dependencies beyond the OS.
 
 ## Why
 
-AI agents need to see and interact with the desktop. Existing tools either shell out to external binaries (fragile), require heavy dependencies (slow to build), or don't work on Wayland. gui-tool does everything through raw kernel interfaces and D-Bus wire protocol — no crates, no subprocess calls, no libc.
+GUI automation on Linux is fragmented — tools shell out to `xdotool` (X11 only), require heavy dependencies, or don't work on Wayland. gui-tool does everything through raw kernel interfaces and D-Bus wire protocol. No crates, no subprocess calls, no libc. One binary, works everywhere GNOME/Wayland runs.
+
+It's also designed as a drop-in tool for AI coding agents (Codex, Gemini CLI, etc.) that need to see and interact with the desktop. The JSON output is easy to parse, and a [skill definition](#ai-agent-integration) is included so agents can discover and use it automatically.
 
 ## Install
 
@@ -104,7 +106,11 @@ Zero crates. Zero `extern "C"`. Zero subprocess calls. ~1,700 lines of Rust.
 
 ## AI Agent Integration
 
-A skill definition is included in `skills/SKILL.md`. Copy it to your AI agent's skill directory to give it automatic access to gui-tool.
+A skill definition following the [open Agent Skills standard](https://agents.md/) is included in `skills/SKILL.md`. It works with any agent that supports the standard, including Codex, Gemini CLI, and others.
+
+To install, copy `skills/` to your agent's skill directory. The agent will automatically discover gui-tool and use it when it needs to interact with the desktop.
+
+Or just add gui-tool to your PATH and mention it in your project's `AGENTS.md` / `GEMINI.md` — most agents will figure it out from the `--help` output and JSON responses.
 
 ## License
 
