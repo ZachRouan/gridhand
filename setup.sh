@@ -37,7 +37,7 @@ fi
 # 2. GNOME window-calls extension
 echo ""
 echo "Installing window-calls GNOME extension..."
-EXT_UUID="window-calls@ickyicky.github.io"
+EXT_UUID="window-calls@domandoman.xyz"
 if gnome-extensions list 2>/dev/null | grep -q "$EXT_UUID"; then
     gnome-extensions enable "$EXT_UUID" 2>/dev/null
     echo "window-calls extension already installed and enabled."
