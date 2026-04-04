@@ -114,9 +114,10 @@ The tool calculates the center of cell C1 within cell B2 and moves there.
 
 ### Key rules
 - **No pixel math.** Cell references from grid images map directly to mouse positions.
-- **Default grid is 8x6.** Override with `--grid 6x4` for denser grids.
+- **Default grid is 8x6.** Grid density auto-scales for zoomed crops — you don't need to track it.
 - **Dot notation for recursive zoom.** `B2.C1` means "cell C1 within cell B2."
-- **`--grid` density must match.** If you used `--grid 6x4` for the screenshot, pass `--grid 6x4` to `mouse move` too.
+- **Zoom out by shortening the chain.** If `--cell A2.B3` was wrong, just use `--cell A2` to go back one level.
+- **Zoom is instant.** Screenshots are cached — zooming into different cells reuses the same image.
 
 ## Common patterns
 
