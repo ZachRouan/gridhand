@@ -25,6 +25,43 @@ pub fn write_png(path: &str, img: &Image) -> Result<(), String> {
     std::fs::write(path, &data).map_err(|e| format!("Failed to write {}: {}", path, e))
 }
 
+/// Scale an image up using nearest-neighbor interpolation.
+/// Ensures the output is at least `min_width x min_height`.
+/// If the image is already large enough, returns a clone.
+pub fn scale_up(img: &Image, min_width: u32, min_height: u32) -> Image {
+    if img.width >= min_width && img.height >= min_height {
+        return Image {
+            width: img.width,
+            height: img.height,
+            bpp: img.bpp,
+            pixels: img.pixels.clone(),
+        };
+    }
+
+    let scale_x = if img.width > 0 { (min_width + img.width - 1) / img.width } else { 1 };
+    let scale_y = if img.height > 0 { (min_height + img.height - 1) / img.height } else { 1 };
+    let scale = scale_x.max(scale_y).max(1);
+
+    let new_w = img.width * scale;
+    let new_h = img.height * scale;
+    let bpp = img.bpp as usize;
+    let mut pixels = vec![0u8; (new_w * new_h) as usize * bpp];
+
+    for y in 0..new_h {
+        for x in 0..new_w {
+            let src_x = x / scale;
+            let src_y = y / scale;
+            let src_idx = (src_y * img.width + src_x) as usize * bpp;
+            let dst_idx = (y * new_w + x) as usize * bpp;
+            for c in 0..bpp {
+                pixels[dst_idx + c] = img.pixels[src_idx + c];
+            }
+        }
+    }
+
+    Image { width: new_w, height: new_h, bpp: img.bpp, pixels }
+}
+
 /// Crop a rectangular region from an image. Coordinates are clamped to image bounds.
 pub fn crop(img: &Image, x: u32, y: u32, w: u32, h: u32) -> Result<Image, String> {
     // Clamp to image bounds

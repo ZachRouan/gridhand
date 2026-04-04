@@ -250,7 +250,12 @@ fn cmd_screenshot(args: &[String]) -> Result<String, String> {
             }
         }
 
-        // Draw grid overlay on the final (possibly cropped) image
+        // Scale up small crops so content is readable in vision models
+        if cell.is_some() {
+            img = platform::png::scale_up(&img, 640, 480);
+        }
+
+        // Draw grid overlay on the final (possibly cropped and scaled) image
         let (final_cols, final_rows) = grid.unwrap_or_else(|| auto_grid(img.width, img.height));
         platform::png::draw_grid(&mut img, final_cols, final_rows);
 
