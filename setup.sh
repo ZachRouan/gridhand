@@ -39,7 +39,8 @@ echo ""
 echo "Installing window-calls GNOME extension..."
 EXT_UUID="window-calls@ickyicky.github.io"
 if gnome-extensions list 2>/dev/null | grep -q "$EXT_UUID"; then
-    echo "window-calls extension already installed."
+    gnome-extensions enable "$EXT_UUID" 2>/dev/null
+    echo "window-calls extension already installed and enabled."
 else
     TMP_DIR="$(mktemp -d /tmp/window-calls-XXXXXX)"
     echo "Downloading window-calls extension from GitHub..."
@@ -49,7 +50,7 @@ else
         EXT_SRC="$TMP_DIR/window-calls-main"
         if [ -d "$EXT_SRC" ] && [ -f "$EXT_SRC/metadata.json" ]; then
             (cd "$EXT_SRC" && zip -qr "$TMP_DIR/ext.zip" .)
-            gnome-extensions install "$TMP_DIR/ext.zip" && echo "window-calls extension installed. Enable it with:" && echo "  gnome-extensions enable $EXT_UUID" || {
+            gnome-extensions install "$TMP_DIR/ext.zip" && gnome-extensions enable "$EXT_UUID" 2>/dev/null; echo "window-calls extension installed and enabled." || {
                 echo "Failed to install extension. Try manually from:"
                 echo "  https://github.com/ickyicky/window-calls"
             }
