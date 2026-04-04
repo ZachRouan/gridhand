@@ -128,7 +128,9 @@ fn parse_cell_ref(s: &str) -> Result<(u32, u32), String> {
 
 /// Compute absolute screen coordinates from a cell chain like "B2.C1".
 /// Uses f64 throughout to avoid integer division drift.
-/// Auto-scales grid density at each recursion level based on region size.
+/// Auto-scales grid density at each recursion level based on region size,
+/// simulating the same scale-up that screenshot zoom applies (min 640x480)
+/// so that grid densities match between screenshot and mouse move.
 /// If `explicit_grid` is Some, uses that fixed density instead of auto-scaling.
 /// Returns the center point of the innermost cell.
 fn cell_to_coords(
@@ -144,9 +146,29 @@ fn cell_to_coords(
     let mut w = bounds_w as f64;
     let mut h = bounds_h as f64;
 
-    for part in cell_chain.split('.') {
-        let (grid_cols, grid_rows) = explicit_grid
-            .unwrap_or_else(|| auto_grid(w as u32, h as u32));
+    let parts: Vec<&str> = cell_chain.split('.').collect();
+
+    for (i, part) in parts.iter().enumerate() {
+        // For sub-cells (not the first level), simulate the scale-up that
+        // screenshot applies to cropped regions before computing auto_grid.
+        // This ensures grid density matches between screenshot and mouse move.
+        let (grid_cols, grid_rows) = if let Some(g) = explicit_grid {
+            g
+        } else if i > 0 {
+            // Simulate scale-up to 640x480 minimum (matches screenshot behavior)
+            let scaled_w = if (w as u32) < 640 || (h as u32) < 480 {
+                let scale_x = if w > 0.0 { (640.0 / w).ceil() as u32 } else { 1 };
+                let scale_y = if h > 0.0 { (480.0 / h).ceil() as u32 } else { 1 };
+                let scale = scale_x.max(scale_y).max(1);
+                (w as u32 * scale, h as u32 * scale)
+            } else {
+                (w as u32, h as u32)
+            };
+            auto_grid(scaled_w.0, scaled_w.1)
+        } else {
+            auto_grid(w as u32, h as u32)
+        };
+
         let (col, row) = parse_cell_ref(part)?;
         if col >= grid_cols || row >= grid_rows {
             return Err(format!(
