@@ -83,6 +83,80 @@ fn extract_window_flags(args: &[String]) -> Result<(Vec<String>, Option<(u64, i3
     }
 }
 
+/// Parse a grid density string like "4x3" into (cols, rows).
+#[allow(dead_code)]
+fn parse_grid(s: &str) -> Result<(u32, u32), String> {
+    let parts: Vec<&str> = s.split('x').collect();
+    if parts.len() != 2 {
+        return Err(format!("Invalid grid format '{}'. Use WxH (e.g., 4x3)", s));
+    }
+    let cols: u32 = parts[0].parse().map_err(|_| format!("Invalid grid columns: {}", parts[0]))?;
+    let rows: u32 = parts[1].parse().map_err(|_| format!("Invalid grid rows: {}", parts[1]))?;
+    if cols == 0 || rows == 0 || cols > 26 || rows > 9 {
+        return Err("Grid dimensions must be 1-26 columns and 1-9 rows".to_string());
+    }
+    Ok((cols, rows))
+}
+
+/// Parse a single cell reference like "B2" into (col, row) zero-indexed.
+#[allow(dead_code)]
+fn parse_cell_ref(s: &str) -> Result<(u32, u32), String> {
+    let bytes = s.as_bytes();
+    if bytes.len() < 2 || bytes.len() > 3 {
+        return Err(format!("Invalid cell reference '{}'. Use format like A1 or B2", s));
+    }
+    let col_char = bytes[0].to_ascii_uppercase();
+    if !col_char.is_ascii_uppercase() {
+        return Err(format!("Invalid column in cell '{}': must be A-Z", s));
+    }
+    let col = (col_char - b'A') as u32;
+    let row_str = &s[1..];
+    let row: u32 = row_str.parse::<u32>()
+        .map_err(|_| format!("Invalid row in cell '{}': must be 1-9", s))?;
+    if row == 0 {
+        return Err(format!("Row must be 1 or greater in cell '{}'", s));
+    }
+    Ok((col, row - 1)) // zero-indexed
+}
+
+/// Compute absolute screen coordinates from a cell chain like "B2.C1".
+/// Uses f64 throughout to avoid integer division drift.
+/// Returns the center point of the innermost cell.
+#[allow(dead_code)]
+fn cell_to_coords(
+    cell_chain: &str,
+    bounds_x: i32,
+    bounds_y: i32,
+    bounds_w: u32,
+    bounds_h: u32,
+    grid_cols: u32,
+    grid_rows: u32,
+) -> Result<(i32, i32), String> {
+    let mut x = bounds_x as f64;
+    let mut y = bounds_y as f64;
+    let mut w = bounds_w as f64;
+    let mut h = bounds_h as f64;
+
+    for part in cell_chain.split('.') {
+        let (col, row) = parse_cell_ref(part)?;
+        if col >= grid_cols || row >= grid_rows {
+            return Err(format!(
+                "Cell '{}' out of range for {}x{} grid",
+                part, grid_cols, grid_rows
+            ));
+        }
+        let cell_w = w / grid_cols as f64;
+        let cell_h = h / grid_rows as f64;
+        x += col as f64 * cell_w;
+        y += row as f64 * cell_h;
+        w = cell_w;
+        h = cell_h;
+    }
+
+    // Return center of the final cell
+    Ok(((x + w / 2.0) as i32, (y + h / 2.0) as i32))
+}
+
 fn cmd_screenshot(args: &[String]) -> Result<String, String> {
     let mut output_path: Option<String> = None;
     let mut window_title: Option<String> = None;
@@ -272,5 +346,62 @@ mod tests {
         let args: Vec<String> = vec!["--window".to_string()];
         let result = extract_window_flags(&args);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_grid_default() {
+        assert_eq!(parse_grid("4x3").unwrap(), (4, 3));
+    }
+
+    #[test]
+    fn test_parse_grid_custom() {
+        assert_eq!(parse_grid("6x4").unwrap(), (6, 4));
+        assert_eq!(parse_grid("10x8").unwrap(), (10, 8));
+    }
+
+    #[test]
+    fn test_parse_grid_invalid() {
+        assert!(parse_grid("abc").is_err());
+        assert!(parse_grid("0x0").is_err());
+        assert!(parse_grid("27x3").is_err()); // > 26 cols
+    }
+
+    #[test]
+    fn test_parse_cell_ref() {
+        assert_eq!(parse_cell_ref("A1").unwrap(), (0, 0));
+        assert_eq!(parse_cell_ref("B2").unwrap(), (1, 1));
+        assert_eq!(parse_cell_ref("D3").unwrap(), (3, 2));
+    }
+
+    #[test]
+    fn test_parse_cell_ref_invalid() {
+        assert!(parse_cell_ref("").is_err());
+        assert!(parse_cell_ref("1A").is_err());
+        assert!(parse_cell_ref("A0").is_err()); // row 0 invalid
+    }
+
+    #[test]
+    fn test_cell_to_coords_single() {
+        // 4x3 grid on a 400x300 window at (100, 50)
+        // Cell B2 = col 1, row 1 → cell is at (200, 150) size (100, 100) → center (250, 200)
+        let (x, y) = cell_to_coords("B2", 100, 50, 400, 300, 4, 3).unwrap();
+        assert_eq!(x, 250);
+        assert_eq!(y, 200);
+    }
+
+    #[test]
+    fn test_cell_to_coords_recursive() {
+        // 4x3 grid on 400x300 at (0, 0)
+        // B2 = (100, 100) size (100, 100)
+        // B2.A1 = within B2: (100, 100) size (25, 33) → center (112, 116)
+        let (x, y) = cell_to_coords("B2.A1", 0, 0, 400, 300, 4, 3).unwrap();
+        assert_eq!(x, 112);
+        assert_eq!(y, 116);
+    }
+
+    #[test]
+    fn test_cell_to_coords_out_of_range() {
+        assert!(cell_to_coords("E1", 0, 0, 400, 300, 4, 3).is_err()); // col 4 >= 4
+        assert!(cell_to_coords("A4", 0, 0, 400, 300, 4, 3).is_err()); // row 3 >= 3
     }
 }
