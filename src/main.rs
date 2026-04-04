@@ -1,6 +1,4 @@
 mod json;
-
-#[cfg(target_os = "linux")]
 mod platform;
 
 fn main() {
@@ -49,17 +47,11 @@ fn cmd_screenshot(args: &[String]) -> Result<String, String> {
 
     let output = output_path.unwrap_or("/tmp/gui-tool-screenshot.png");
 
-    #[cfg(target_os = "linux")]
-    {
-        if let Some(title) = window_title {
-            platform::screenshot_window(title, output)
-        } else {
-            platform::screenshot_full(output)
-        }
+    if let Some(title) = window_title {
+        platform::screenshot_window(title, output)
+    } else {
+        platform::screenshot_full(output)
     }
-
-    #[cfg(not(target_os = "linux"))]
-    Err("Platform not supported yet".to_string())
 }
 
 fn cmd_windows(args: &[String]) -> Result<String, String> {
@@ -68,21 +60,13 @@ fn cmd_windows(args: &[String]) -> Result<String, String> {
     }
 
     match args[0].as_str() {
-        "list" => {
-            #[cfg(target_os = "linux")]
-            { platform::list_windows() }
-            #[cfg(not(target_os = "linux"))]
-            Err("Platform not supported yet".to_string())
-        }
+        "list" => platform::list_windows(),
         "raise" => {
             let id: u32 = args.get(1)
                 .ok_or("Usage: gui-tool windows raise <id>")?
                 .parse()
                 .map_err(|_| "Invalid window ID")?;
-            #[cfg(target_os = "linux")]
-            { platform::raise_window(id) }
-            #[cfg(not(target_os = "linux"))]
-            Err("Platform not supported yet".to_string())
+            platform::raise_window(id)
         }
         _ => Err(format!("Unknown windows subcommand: {}", args[0])),
     }
@@ -101,10 +85,7 @@ fn cmd_mouse(args: &[String]) -> Result<String, String> {
             let y: i32 = args.get(2)
                 .ok_or("Usage: gui-tool mouse move <x> <y>")?
                 .parse().map_err(|_| "Invalid y coordinate")?;
-            #[cfg(target_os = "linux")]
-            { platform::mouse_move(x, y) }
-            #[cfg(not(target_os = "linux"))]
-            Err("Platform not supported yet".to_string())
+            platform::mouse_move(x, y)
         }
         "click" => {
             let mut button = "left";
@@ -123,10 +104,7 @@ fn cmd_mouse(args: &[String]) -> Result<String, String> {
                 }
                 i += 1;
             }
-            #[cfg(target_os = "linux")]
-            { platform::mouse_click(button) }
-            #[cfg(not(target_os = "linux"))]
-            Err("Platform not supported yet".to_string())
+            platform::mouse_click(button)
         }
         _ => Err(format!("Unknown mouse subcommand: {}", args[0])),
     }
@@ -140,17 +118,11 @@ fn cmd_key(args: &[String]) -> Result<String, String> {
     match args[0].as_str() {
         "type" => {
             let text = args.get(1).ok_or("Usage: gui-tool key type <text>")?;
-            #[cfg(target_os = "linux")]
-            { platform::key_type(text) }
-            #[cfg(not(target_os = "linux"))]
-            Err("Platform not supported yet".to_string())
+            platform::key_type(text)
         }
         "press" => {
             let combo = args.get(1).ok_or("Usage: gui-tool key press <combo>")?;
-            #[cfg(target_os = "linux")]
-            { platform::key_press(combo) }
-            #[cfg(not(target_os = "linux"))]
-            Err("Platform not supported yet".to_string())
+            platform::key_press(combo)
         }
         _ => Err(format!("Unknown key subcommand: {}", args[0])),
     }
