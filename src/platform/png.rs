@@ -697,9 +697,7 @@ const GLYPH_WIDTH: u32 = 6;
 #[allow(dead_code)]
 const GLYPH_HEIGHT: u32 = 8;
 #[allow(dead_code)]
-const LABEL_SCALE: u32 = 2; // render glyphs at 2x for readability
-#[allow(dead_code)]
-const LABEL_PADDING: u32 = 5;
+const LABEL_PADDING: u32 = 3;
 
 #[allow(dead_code)]
 fn get_glyph(c: char) -> Option<&'static [u8; 8]> {
@@ -708,12 +706,18 @@ fn get_glyph(c: char) -> Option<&'static [u8; 8]> {
 
 /// Draw a labeled grid overlay on an image.
 /// Columns are labeled A, B, C...; rows are labeled 1, 2, 3...
+/// Label scale adapts to cell size: 2x for large cells, 1x for small cells.
 #[allow(dead_code)]
 pub fn draw_grid(img: &mut Image, cols: u32, rows: u32) {
     let w = img.width;
     let h = img.height;
     let cell_w = w / cols;
     let cell_h = h / rows;
+
+    // Scale labels based on cell size — use 2x if cells are large enough, else 1x
+    let min_cell = cell_w.min(cell_h);
+    let scale = if min_cell >= 60 { 2u32 } else { 1u32 };
+    let pad = if scale == 2 { 5u32 } else { 2u32 };
 
     // Draw vertical grid lines
     for col in 1..cols {
@@ -733,17 +737,17 @@ pub fn draw_grid(img: &mut Image, cols: u32, rows: u32) {
             let label_col = (b'A' + col as u8) as char;
             let label_row_char = (b'1' + row as u8) as char;
 
-            let lx = col * cell_w + LABEL_PADDING;
-            let ly = row * cell_h + LABEL_PADDING;
+            let lx = col * cell_w + pad;
+            let ly = row * cell_h + pad;
 
             // Draw background rectangle behind label
-            let bg_w = GLYPH_WIDTH * LABEL_SCALE * 2 + LABEL_PADDING * 2;
-            let bg_h = GLYPH_HEIGHT * LABEL_SCALE + LABEL_PADDING;
+            let bg_w = GLYPH_WIDTH * scale * 2 + pad * 2;
+            let bg_h = GLYPH_HEIGHT * scale + pad;
             draw_filled_rect(img, lx, ly, bg_w, bg_h, [0, 0, 0, 200]);
 
             // Draw the two characters (e.g., "A1")
-            draw_char(img, label_col, lx + LABEL_PADDING, ly + LABEL_PADDING / 2);
-            draw_char(img, label_row_char, lx + LABEL_PADDING + GLYPH_WIDTH * LABEL_SCALE + 1, ly + LABEL_PADDING / 2);
+            draw_char_scaled(img, label_col, lx + pad, ly + pad / 2, scale);
+            draw_char_scaled(img, label_row_char, lx + pad + GLYPH_WIDTH * scale + 1, ly + pad / 2, scale);
         }
     }
 }
@@ -794,7 +798,7 @@ fn draw_filled_rect(img: &mut Image, x: u32, y: u32, w: u32, h: u32, color: [u8;
 }
 
 #[allow(dead_code)]
-fn draw_char(img: &mut Image, c: char, x: u32, y: u32) {
+fn draw_char_scaled(img: &mut Image, c: char, x: u32, y: u32, scale: u32) {
     let glyph = match get_glyph(c) {
         Some(g) => g,
         None => return,
@@ -803,11 +807,10 @@ fn draw_char(img: &mut Image, c: char, x: u32, y: u32) {
         let bits = glyph[row as usize];
         for col in 0..GLYPH_WIDTH {
             if bits & (0x80 >> col) != 0 {
-                // Draw at LABEL_SCALE size
-                for sy in 0..LABEL_SCALE {
-                    for sx in 0..LABEL_SCALE {
-                        let px = x + col * LABEL_SCALE + sx;
-                        let py = y + row * LABEL_SCALE + sy;
+                for sy in 0..scale {
+                    for sx in 0..scale {
+                        let px = x + col * scale + sx;
+                        let py = y + row * scale + sy;
                         if px < img.width && py < img.height {
                             set_pixel(img, px, py, [255, 255, 255, 255]);
                         }
