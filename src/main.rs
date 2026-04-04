@@ -170,6 +170,7 @@ fn cmd_screenshot(args: &[String]) -> Result<String, String> {
     let mut output_path: Option<String> = None;
     let mut window_title: Option<String> = None;
     let mut window_id: Option<u64> = None;
+    let mut grid_enabled = false;
     let mut grid: Option<(u32, u32)> = None;
     let mut cell: Option<String> = None;
     let mut i = 0;
@@ -194,16 +195,14 @@ fn cmd_screenshot(args: &[String]) -> Result<String, String> {
                 );
             }
             "--grid" => {
-                // Check if next arg is a WxH value or another flag
+                grid_enabled = true;
+                // Check if next arg is an explicit WxH value
                 if let Some(next) = args.get(i + 1) {
                     if !next.starts_with('-') && next.contains('x') {
                         grid = Some(parse_grid(next)?);
                         i += 1;
-                    } else {
-                        grid = Some((8, 6)); // default
                     }
-                } else {
-                    grid = Some((8, 6)); // default
+                    // else: no explicit value, auto-scale will be used
                 }
             }
             "--cell" => {
@@ -231,7 +230,7 @@ fn cmd_screenshot(args: &[String]) -> Result<String, String> {
     };
 
     // Post-process: apply cell crop and/or grid overlay
-    if cell.is_some() || grid.is_some() {
+    if cell.is_some() || grid_enabled {
         let mut img = platform::png::read_png(output)?;
 
         // If --cell is specified, recursively crop through dot-separated refs
@@ -255,15 +254,14 @@ fn cmd_screenshot(args: &[String]) -> Result<String, String> {
         let (final_cols, final_rows) = grid.unwrap_or_else(|| auto_grid(img.width, img.height));
         platform::png::draw_grid(&mut img, final_cols, final_rows);
 
-        // Include grid density in output so agents know what was used
-        let grid_info = format!("{}x{}", final_cols, final_rows);
         platform::png::write_png(output, &img)?;
 
-        // Re-read the original result JSON and append grid info
-        // (The result string was already generated above — we append grid to it)
-        let mut result_with_grid = result.trim_end_matches('}').to_string();
-        result_with_grid.push_str(&format!(",\"grid\":\"{}\"}}", grid_info));
-        return Ok(result_with_grid);
+        // Build clean JSON output with grid info
+        let grid_info = format!("{}x{}", final_cols, final_rows);
+        return Ok(json::success_with(vec![
+            ("path", json::JsonValue::Str(output)),
+            ("grid", json::JsonValue::OwnedStr(grid_info)),
+        ]));
     }
 
     // Print the original JSON result (path, bounds, etc.)
