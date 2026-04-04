@@ -80,34 +80,38 @@ Errors go to stderr as JSON:
 {"status":"error","message":"..."}
 ```
 
-## Coordinate workflow for agents
+## Precision Targeting (Grid Workflow)
 
-When you need to click something inside a window, follow this sequence:
+The grid system eliminates pixel coordinate guessing. The agent reads cell labels from images instead of computing coordinates.
 
-### 1. Get the window ID
+### Step 1: Get a grid view
 ```bash
-gui-tool windows list
+gui-tool screenshot --window-id 123 --grid --output /tmp/grid.png
 ```
-Parse the JSON to find the target window's `id` field.
+The screenshot has a labeled 4x3 grid overlay (cells A1 through D3).
 
-### 2. Take a cropped screenshot
-```bash
-gui-tool screenshot --window-id <id> --output /tmp/target.png
-```
-This gives you an image of **just that window**, cropped to its bounds. Analyze this image to find your click target.
+### Step 2: Identify the target cell
+Read the grid image. Find which cell contains your target (e.g., the button is in B2).
 
-### 3. Click using window-relative coordinates
+### Step 3: Zoom if needed
+If the target is small within the cell, zoom into it:
 ```bash
-gui-tool mouse move <x> <y> --window-id <id>
-gui-tool mouse click --window-id <id>
+gui-tool screenshot --window-id 123 --grid --cell B2 --output /tmp/zoom.png
 ```
-When `--window-id` is used with `mouse move`, coordinates are **relative to the window's top-left corner**. So if a button appears at pixel (200, 150) in the cropped screenshot, use those exact values — no screen offset math needed.
+This crops to cell B2 and draws a new sub-grid. Find the sub-cell (e.g., C1).
+
+### Step 4: Click
+```bash
+gui-tool mouse move --cell B2.C1 --window-id 123
+gui-tool mouse click --window-id 123
+```
+The tool calculates the center of cell C1 within cell B2 and moves there.
 
 ### Key rules
-- **Always use `--window-id`** for multi-step interactions. It prevents focus race conditions by raising the window in the same process.
-- **Coordinates with `--window-id` are window-relative.** The screenshot you took is already cropped to the window, so pixel positions in the image map directly to mouse coordinates.
-- **Coordinates without `--window-id` are absolute screen positions.** Only use this if you're working with the full desktop.
-- **Prefer `--window-id` over `--window`** when you have the ID. Title matching (`--window`) is fuzzy and may grab the wrong window if multiple have similar titles.
+- **No pixel math.** Cell references from grid images map directly to mouse positions.
+- **Default grid is 4x3.** Override with `--grid 6x4` for denser grids.
+- **Dot notation for recursive zoom.** `B2.C1` means "cell C1 within cell B2."
+- **`--grid` density must match.** If you used `--grid 6x4` for the screenshot, pass `--grid 6x4` to `mouse move` too.
 
 ## Common patterns
 

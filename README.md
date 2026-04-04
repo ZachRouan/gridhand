@@ -161,6 +161,28 @@ gui-tool mouse click --window "Firefox"
 
 When `--window` or `--window-id` is used with `mouse move`, coordinates are relative to the window — pixel positions from a cropped screenshot map directly to mouse coordinates.
 
+### Grid Targeting (for AI agents)
+
+```bash
+# Screenshot with labeled grid overlay (default 4x3)
+gui-tool screenshot --window-id 123 --grid --output /tmp/grid.png
+
+# Custom grid density
+gui-tool screenshot --window-id 123 --grid 6x4 --output /tmp/grid.png
+
+# Zoom into a cell with sub-grid
+gui-tool screenshot --window-id 123 --grid --cell B2 --output /tmp/zoom.png
+
+# Click a cell (moves to center of that cell)
+gui-tool mouse move --cell B2 --window-id 123
+
+# Recursive: click cell C1 within cell B2
+gui-tool mouse move --cell B2.C1 --window-id 123
+gui-tool mouse click --window-id 123
+```
+
+Agents read cell labels from grid images instead of computing pixel coordinates. One or two zoom levels provide button-level precision on any resolution.
+
 ### Keyboard
 
 ```bash
