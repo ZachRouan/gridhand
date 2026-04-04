@@ -41,20 +41,27 @@ EXT_UUID="window-calls@ickyicky.github.io"
 if gnome-extensions list 2>/dev/null | grep -q "$EXT_UUID"; then
     echo "window-calls extension already installed."
 else
-    EXT_URL="https://extensions.gnome.org/extension-data/window-calls%40ickyicky.github.io.v10.shell-extension.zip"
-    TMP_ZIP="$(mktemp /tmp/window-calls-XXXXXX.zip)"
-    echo "Downloading window-calls extension..."
-    if curl -sL "$EXT_URL" -o "$TMP_ZIP" 2>/dev/null || wget -q "$EXT_URL" -O "$TMP_ZIP" 2>/dev/null; then
-        gnome-extensions install "$TMP_ZIP" && echo "window-calls extension installed." || {
-            echo "Failed to install extension. Try manually from:"
-            echo "  https://extensions.gnome.org/extension/4724/window-calls/"
-        }
-        rm -f "$TMP_ZIP"
+    TMP_DIR="$(mktemp -d /tmp/window-calls-XXXXXX)"
+    echo "Downloading window-calls extension from GitHub..."
+    if curl -sL "https://github.com/ickyicky/window-calls/archive/refs/heads/main.tar.gz" -o "$TMP_DIR/ext.tar.gz" 2>/dev/null; then
+        tar -xzf "$TMP_DIR/ext.tar.gz" -C "$TMP_DIR"
+        # Pack as extension zip from the extracted source
+        EXT_SRC="$TMP_DIR/window-calls-main"
+        if [ -d "$EXT_SRC" ] && [ -f "$EXT_SRC/metadata.json" ]; then
+            (cd "$EXT_SRC" && zip -qr "$TMP_DIR/ext.zip" .)
+            gnome-extensions install "$TMP_DIR/ext.zip" && echo "window-calls extension installed. Enable it with:" && echo "  gnome-extensions enable $EXT_UUID" || {
+                echo "Failed to install extension. Try manually from:"
+                echo "  https://github.com/ickyicky/window-calls"
+            }
+        else
+            echo "Unexpected archive layout. Install manually from:"
+            echo "  https://github.com/ickyicky/window-calls"
+        fi
     else
-        rm -f "$TMP_ZIP"
         echo "Failed to download extension. Install manually from:"
-        echo "  https://extensions.gnome.org/extension/4724/window-calls/"
+        echo "  https://github.com/ickyicky/window-calls"
     fi
+    rm -rf "$TMP_DIR"
 fi
 
 # 3. Build
