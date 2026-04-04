@@ -1,6 +1,6 @@
 # gui-tool
 
-A zero-dependency Rust CLI for GUI interaction on Linux and macOS. Screenshots, window management, mouse control, keyboard input. Use it from the terminal, shell scripts, or as a tool for AI coding agents. JSON-in/JSON-out, single binary, no runtime dependencies beyond the OS.
+A zero-dependency Rust CLI for GUI interaction on Linux, macOS, and Windows. Screenshots, window management, mouse control, keyboard input. Use it from the terminal, shell scripts, or as a tool for AI coding agents. JSON-in/JSON-out, single binary, no runtime dependencies beyond the OS.
 
 ## Why
 
@@ -96,8 +96,11 @@ Everything is implemented from scratch using only Rust's standard library:
 - **Input (macOS)**: CoreGraphics event injection (`CGEventCreateMouseEvent`, `CGEventCreateKeyboardEvent`)
 - **Screenshots (macOS)**: `CGWindowListCreateImage` with native window cropping
 - **Windows (macOS)**: `CGWindowListCopyWindowInfo` + Objective-C runtime for window activation
+- **Input (Windows)**: `SendInput` from user32.dll for mouse and keyboard injection
+- **Screenshots (Windows)**: `BitBlt` + `GetDIBits` from gdi32.dll, raw pixel extraction to PNG
+- **Windows (Windows)**: `EnumWindows` + `SetForegroundWindow` from user32.dll
 
-Zero crates. Zero subprocess calls. ~2,500 lines of Rust.
+Zero crates. Zero subprocess calls. ~3,500 lines of Rust.
 
 ## Requirements
 
@@ -111,6 +114,10 @@ Zero crates. Zero subprocess calls. ~2,500 lines of Rust.
 - macOS 10.15+
 - Accessibility permission (System Settings > Privacy & Security > Accessibility) — required for mouse/keyboard input
 - Screen Recording permission (System Settings > Privacy & Security > Screen Recording) — required for screenshots
+
+### Windows
+- Windows 8+
+- No special permissions required
 
 ## AI Agent Integration
 

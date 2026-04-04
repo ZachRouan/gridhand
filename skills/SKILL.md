@@ -5,7 +5,7 @@ description: Interact with the desktop GUI — take screenshots, list/raise wind
 
 # gui-tool
 
-Use `gui-tool` to interact with the desktop (Linux and macOS). Ensure the binary is built (`cargo build --release`) and on your PATH.
+Use `gui-tool` to interact with the desktop (Linux, macOS, and Windows). Ensure the binary is built (`cargo build --release`) and on your PATH.
 
 ## Commands
 
@@ -109,6 +109,7 @@ gui-tool key press "ctrl+c"
 
 ## Requirements
 
-- Linux with GNOME/Wayland, or macOS 10.15+
+- Linux with GNOME/Wayland, macOS 10.15+, or Windows 8+
 - On Linux: user must be in `input` group, `window-calls@domandoman.xyz` extension enabled. Run `setup.sh` if not set up.
 - On macOS: grant Accessibility and Screen Recording permissions to the binary in System Settings
+- On Windows: no special setup required
