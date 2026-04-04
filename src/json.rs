@@ -84,3 +84,74 @@ pub fn error(msg: &str) -> String {
         ("message", JsonValue::Str(msg)),
     ]).to_string()
 }
+
+pub fn split_json_array(json: &str) -> Vec<&str> {
+    let json = json.trim();
+    if !json.starts_with('[') || !json.ends_with(']') {
+        return Vec::new();
+    }
+    let inner = &json[1..json.len()-1];
+    let mut results = Vec::new();
+    let mut depth = 0;
+    let mut start = 0;
+    let mut in_string = false;
+    let mut escape_next = false;
+
+    for (i, ch) in inner.char_indices() {
+        if escape_next {
+            escape_next = false;
+            continue;
+        }
+        if ch == '\\' && in_string {
+            escape_next = true;
+            continue;
+        }
+        if ch == '"' {
+            in_string = !in_string;
+            continue;
+        }
+        if in_string { continue; }
+        match ch {
+            '{' => depth += 1,
+            '}' => depth -= 1,
+            ',' if depth == 0 => {
+                results.push(inner[start..i].trim());
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    let last = inner[start..].trim();
+    if !last.is_empty() {
+        results.push(last);
+    }
+    results
+}
+
+pub fn extract_json_string<'a>(json: &'a str, key: &str) -> Option<&'a str> {
+    let pattern = format!("\"{}\"", key);
+    let idx = json.find(&pattern)?;
+    let after_key = &json[idx + pattern.len()..];
+    let after_colon = after_key.trim_start().strip_prefix(':')?;
+    let after_colon = after_colon.trim_start();
+    if !after_colon.starts_with('"') { return None; }
+    let start = 1;
+    let mut end = start;
+    let bytes = after_colon.as_bytes();
+    while end < bytes.len() {
+        if bytes[end] == b'\\' { end += 2; continue; }
+        if bytes[end] == b'"' { break; }
+        end += 1;
+    }
+    Some(&after_colon[start..end])
+}
+
+pub fn extract_json_number(json: &str, key: &str) -> Option<u32> {
+    let pattern = format!("\"{}\"", key);
+    let idx = json.find(&pattern)?;
+    let after_key = &json[idx + pattern.len()..];
+    let after_colon = after_key.trim_start().strip_prefix(':')?;
+    let after_colon = after_colon.trim_start();
+    let end = after_colon.find(|c: char| !c.is_ascii_digit()).unwrap_or(after_colon.len());
+    after_colon[..end].parse().ok()
+}

@@ -42,13 +42,13 @@ pub fn screenshot_window(title: &str, output: &str) -> Result<String, String> {
 
     // Get window details (x, y, width, height) for cropping
     let details_json = windows::get_window_details(&mut conn, win_id)?;
-    let win_x = windows::extract_json_number(&details_json, "x")
+    let win_x = crate::json::extract_json_number(&details_json, "x")
         .ok_or_else(|| "Window details missing 'x' field".to_string())?;
-    let win_y = windows::extract_json_number(&details_json, "y")
+    let win_y = crate::json::extract_json_number(&details_json, "y")
         .ok_or_else(|| "Window details missing 'y' field".to_string())?;
-    let win_w = windows::extract_json_number(&details_json, "width")
+    let win_w = crate::json::extract_json_number(&details_json, "width")
         .ok_or_else(|| "Window details missing 'width' field".to_string())?;
-    let win_h = windows::extract_json_number(&details_json, "height")
+    let win_h = crate::json::extract_json_number(&details_json, "height")
         .ok_or_else(|| "Window details missing 'height' field".to_string())?;
 
     // Take full-screen screenshot
