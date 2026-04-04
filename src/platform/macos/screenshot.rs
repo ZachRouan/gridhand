@@ -36,6 +36,27 @@ pub fn screenshot_window(title: &str, output: &str) -> Result<String, String> {
     ]))
 }
 
+pub fn screenshot_window_by_id(id: u64, output: &str) -> Result<String, String> {
+    // Raise the window first
+    windows::raise_window(id)?;
+    std::thread::sleep(std::time::Duration::from_millis(300));
+
+    // Capture just this window — macOS crops natively
+    let image = capture_screen(
+        kCGWindowListOptionIncludingWindow,
+        id as u32,
+        CGRect::null(),
+    )?;
+    let img = extract_pixels(image)?;
+    unsafe { CFRelease(image); }
+
+    crate::platform::png::write_png(output, &img)?;
+
+    Ok(json::success_with(vec![
+        ("path", JsonValue::Str(output)),
+    ]))
+}
+
 fn capture_screen(list_option: u32, window_id: u32, bounds: CGRect) -> Result<*mut c_void, String> {
     unsafe {
         let image = CGWindowListCreateImage(

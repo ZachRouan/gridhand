@@ -52,6 +52,36 @@ pub fn screenshot_window(title: &str, output: &str) -> Result<String, String> {
     ]))
 }
 
+pub fn screenshot_window_by_id(id: u64, output: &str) -> Result<String, String> {
+    // Raise the window first
+    windows::raise_window(id)?;
+    std::thread::sleep(std::time::Duration::from_millis(300));
+
+    // Get window bounds
+    let rect = windows::get_window_rect(id)?;
+    let x = rect.left;
+    let y = rect.top;
+    let w = rect.right - rect.left;
+    let h = rect.bottom - rect.top;
+
+    if w <= 0 || h <= 0 {
+        return Err(format!("Window {} has invalid dimensions", id));
+    }
+
+    let img = capture_region(x, y, w, h)?;
+    crate::platform::png::write_png(output, &img)?;
+
+    let bounds_json = format!(
+        "{{\"x\":{},\"y\":{},\"width\":{},\"height\":{}}}",
+        x, y, w, h
+    );
+
+    Ok(json::success_with(vec![
+        ("path", JsonValue::Str(output)),
+        ("bounds", JsonValue::RawJson(bounds_json)),
+    ]))
+}
+
 fn capture_region(x: i32, y: i32, width: i32, height: i32) -> Result<crate::platform::png::Image, String> {
     unsafe {
         // Get screen DC

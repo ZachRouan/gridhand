@@ -72,6 +72,54 @@ pub fn screenshot_window(title: &str, output: &str) -> Result<String, String> {
     ]))
 }
 
+pub fn screenshot_window_by_id(id: u64, output: &str) -> Result<String, String> {
+    let mut conn = DbusConnection::connect()?;
+
+    // Raise the window first
+    let mut body = MarshalBuffer::new();
+    body.write_u32(id as u32);
+    conn.call_method(
+        "org.gnome.Shell",
+        "/org/gnome/Shell/Extensions/Windows",
+        "org.gnome.Shell.Extensions.Windows",
+        "Activate",
+        Some("u"),
+        &body.into_bytes(),
+    )?;
+
+    std::thread::sleep(std::time::Duration::from_millis(300));
+
+    // Get window details (x, y, width, height) for cropping
+    let details_json = windows::get_window_details(&mut conn, id as u32)?;
+    let win_x = crate::json::extract_json_number(&details_json, "x")
+        .ok_or_else(|| "Window details missing 'x' field".to_string())?;
+    let win_y = crate::json::extract_json_number(&details_json, "y")
+        .ok_or_else(|| "Window details missing 'y' field".to_string())?;
+    let win_w = crate::json::extract_json_number(&details_json, "width")
+        .ok_or_else(|| "Window details missing 'width' field".to_string())?;
+    let win_h = crate::json::extract_json_number(&details_json, "height")
+        .ok_or_else(|| "Window details missing 'height' field".to_string())?;
+
+    // Take full-screen screenshot via portal
+    let uri = take_portal_screenshot(&mut conn)?;
+    let src_path = uri_to_path(&uri)?;
+
+    // Read, crop, and write the PNG
+    let full_img = crate::platform::png::read_png(&src_path)?;
+    let cropped = crate::platform::png::crop(&full_img, win_x, win_y, win_w, win_h)?;
+    crate::platform::png::write_png(output, &cropped)?;
+
+    Ok(json::success_with(vec![
+        ("path", JsonValue::Str(output)),
+        ("bounds", JsonValue::Object(vec![
+            ("x", JsonValue::Int(win_x as i64)),
+            ("y", JsonValue::Int(win_y as i64)),
+            ("width", JsonValue::Int(win_w as i64)),
+            ("height", JsonValue::Int(win_h as i64)),
+        ])),
+    ]))
+}
+
 fn take_portal_screenshot(conn: &mut DbusConnection) -> Result<String, String> {
     let sender_escaped = conn.unique_name()
         .trim_start_matches(':')
