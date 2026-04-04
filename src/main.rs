@@ -62,7 +62,7 @@ fn cmd_windows(args: &[String]) -> Result<String, String> {
     match args[0].as_str() {
         "list" => platform::list_windows(),
         "raise" => {
-            let id: u32 = args.get(1)
+            let id: u64 = args.get(1)
                 .ok_or("Usage: gui-tool windows raise <id>")?
                 .parse()
                 .map_err(|_| "Invalid window ID")?;

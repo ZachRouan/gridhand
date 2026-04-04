@@ -15,7 +15,7 @@ pub fn list_windows() -> Result<String, String> {
     windows::list_windows()
 }
 
-pub fn raise_window(id: u32) -> Result<String, String> {
+pub fn raise_window(id: u64) -> Result<String, String> {
     windows::raise_window(id)
 }
 

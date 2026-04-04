@@ -9,9 +9,9 @@ pub fn list_windows() -> Result<String, String> {
     ]))
 }
 
-pub fn raise_window(id: u32) -> Result<String, String> {
+pub fn raise_window(id: u64) -> Result<String, String> {
     // Find the PID for this window
-    let pid = get_window_pid(id)?;
+    let pid = get_window_pid(id as u32)?;
 
     // Use NSRunningApplication to activate the app
     unsafe {
