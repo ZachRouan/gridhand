@@ -13,7 +13,7 @@ It's also designed as a drop-in tool for AI coding agents (Codex, Gemini CLI, et
 Requires the [Rust toolchain](https://rustup.rs/).
 
 ```bash
-git clone https://github.com/zachr-ux/gui-tool
+git clone https://github.com/zachr-ux/agent-desktop-interface
 cd gui-tool
 ./setup.sh
 ```
