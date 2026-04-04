@@ -27,9 +27,9 @@ fn main() {
 }
 
 /// Pre-parse args to extract --window and --window-id flags.
-/// Returns (remaining_args, window_id_if_focused).
+/// Returns (remaining_args, Option<(id, x, y, w, h)>).
 /// If a window flag is present, raises the window and sleeps for focus.
-fn extract_window_flags(args: &[String]) -> Result<(Vec<String>, Option<u64>), String> {
+fn extract_window_flags(args: &[String]) -> Result<(Vec<String>, Option<(u64, i32, i32, u32, u32)>), String> {
     let mut remaining = Vec::new();
     let mut window_title: Option<String> = None;
     let mut window_id: Option<u64> = None;
@@ -61,12 +61,10 @@ fn extract_window_flags(args: &[String]) -> Result<(Vec<String>, Option<u64>), S
         i += 1;
     }
 
-    // Error if both flags provided
     if window_title.is_some() && window_id.is_some() {
         return Err("Cannot use both --window and --window-id".to_string());
     }
 
-    // Resolve title to ID if needed
     let resolved_id = if let Some(title) = &window_title {
         let (id, _) = platform::find_window_by_title(title)?
             .ok_or_else(|| format!("No window found matching '{}'", title))?;
@@ -75,13 +73,14 @@ fn extract_window_flags(args: &[String]) -> Result<(Vec<String>, Option<u64>), S
         window_id
     };
 
-    // Raise window and wait for focus
     if let Some(id) = resolved_id {
         platform::raise_window(id)?;
         std::thread::sleep(std::time::Duration::from_millis(200));
+        let (x, y, w, h) = platform::get_window_bounds(id)?;
+        Ok((remaining, Some((id, x, y, w, h))))
+    } else {
+        Ok((remaining, None))
     }
-
-    Ok((remaining, resolved_id))
 }
 
 fn cmd_screenshot(args: &[String]) -> Result<String, String> {
@@ -167,7 +166,7 @@ fn cmd_mouse(args: &[String]) -> Result<String, String> {
     let sub_args = &args[1..];
 
     // Extract window flags from the remaining args
-    let (remaining, focused_window_id) = extract_window_flags(sub_args)?;
+    let (remaining, window_info) = extract_window_flags(sub_args)?;
 
     match subcmd {
         "move" => {
@@ -178,9 +177,7 @@ fn cmd_mouse(args: &[String]) -> Result<String, String> {
                 .ok_or("Usage: gui-tool mouse move <x> <y>")?
                 .parse().map_err(|_| "Invalid y coordinate")?;
 
-            // When targeting a window, coords are relative to its top-left
-            if let Some(win_id) = focused_window_id {
-                let (wx, wy) = platform::get_window_position(win_id)?;
+            if let Some((_, wx, wy, _, _)) = window_info {
                 x += wx;
                 y += wy;
             }
@@ -219,7 +216,7 @@ fn cmd_key(args: &[String]) -> Result<String, String> {
     let sub_args = &args[1..];
 
     // Extract window flags from the remaining args
-    let (remaining, _) = extract_window_flags(sub_args)?;
+    let (remaining, _window_info) = extract_window_flags(sub_args)?;
 
     match subcmd {
         "type" => {

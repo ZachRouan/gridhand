@@ -20,8 +20,8 @@ pub fn find_window_by_title(title: &str) -> Result<Option<(u64, String)>, String
         .map(|opt| opt.map(|(id, json)| (id as u64, json)))
 }
 
-pub fn get_window_position(id: u64) -> Result<(i32, i32), String> {
-    windows::get_window_position(id as u32)
+pub fn get_window_bounds(id: u64) -> Result<(i32, i32, u32, u32), String> {
+    windows::get_window_bounds(id as u32)
 }
 
 pub fn list_windows() -> Result<String, String> {

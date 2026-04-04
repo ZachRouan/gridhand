@@ -119,7 +119,7 @@ fn get_window_list() -> Result<String, String> {
     }
 }
 
-pub fn get_window_position(window_id: u32) -> Result<(i32, i32), String> {
+pub fn get_window_bounds(window_id: u32) -> Result<(i32, i32, u32, u32), String> {
     unsafe {
         let list = CGWindowListCopyWindowInfo(
             kCGWindowListOptionOnScreenOnly,
@@ -143,7 +143,12 @@ pub fn get_window_position(window_id: u32) -> Result<(i32, i32), String> {
                     let mut rect = CGRect::null();
                     if CGRectMakeWithDictionaryRepresentation(bounds_val, &mut rect) {
                         CFRelease(list);
-                        return Ok((rect.origin.x as i32, rect.origin.y as i32));
+                        return Ok((
+                            rect.origin.x as i32,
+                            rect.origin.y as i32,
+                            rect.size.width as u32,
+                            rect.size.height as u32,
+                        ));
                     }
                 }
                 CFRelease(list);

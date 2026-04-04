@@ -19,9 +19,14 @@ pub fn find_window_by_title(title: &str) -> Result<Option<(u64, String)>, String
     windows::find_window_by_title(title)
 }
 
-pub fn get_window_position(id: u64) -> Result<(i32, i32), String> {
+pub fn get_window_bounds(id: u64) -> Result<(i32, i32, u32, u32), String> {
     let rect = windows::get_window_rect(id)?;
-    Ok((rect.left, rect.top))
+    Ok((
+        rect.left,
+        rect.top,
+        (rect.right - rect.left) as u32,
+        (rect.bottom - rect.top) as u32,
+    ))
 }
 
 pub fn list_windows() -> Result<String, String> {
