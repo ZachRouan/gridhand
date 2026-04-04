@@ -1,12 +1,49 @@
 # gui-tool
 
-A zero-dependency Rust CLI for GUI interaction on Linux, macOS, and Windows. Screenshots, window management, mouse control, keyboard input. Use it from the terminal, shell scripts, or as a tool for AI coding agents. JSON-in/JSON-out, single binary, no runtime dependencies beyond the OS.
+`Linux` `macOS` `Windows` `Zero Dependencies`
 
-## Why
+A lightweight, zero-dependency binary that gives AI coding agents reliable native control over local desktops. Screenshots, window management, mouse control, keyboard input — all through raw OS APIs with strict JSON output.
 
-GUI automation is fragmented — tools shell out to `xdotool` (X11 only) or `osascript`, require heavy dependencies, or don't work on Wayland. gui-tool does everything through raw kernel interfaces and native FFI. No crates, no subprocess calls. One binary per platform.
+Also works as a standalone CLI tool for shell scripts and automation.
 
-It's also designed as a drop-in tool for AI coding agents (Codex, Gemini CLI, etc.) that need to see and interact with the desktop. The JSON output is easy to parse, and a [skill definition](#ai-agent-integration) is included so agents can discover and use it automatically.
+## Why Agents Need This
+
+**Deterministic Output.** Every command returns structured JSON. No HTML to parse, no OCR to fail, no unstructured text to hallucinate over.
+
+```json
+{"status":"success","windows":[{"id":1234,"title":"Firefox","pid":5678}]}
+```
+
+**Native FFI.** Direct syscalls and OS framework calls — not brittle wrappers around `xdotool`, `osascript`, or `pyautogui`. Works on Wayland where most Linux automation tools don't.
+
+**Secure & Auditable.** Zero third-party crates. Zero subprocess calls. The entire tool is ~3,500 lines of Rust using only the standard library. Minimal attack surface for agents running locally.
+
+## Agent Integration
+
+A skill definition following the [open Agent Skills standard](https://agents.md/) is included in [`skills/SKILL.md`](skills/SKILL.md). It works with any compatible agent, including Codex, Gemini CLI, and others.
+
+**Quick setup:** Copy `skills/` to your agent's skill directory, or add gui-tool to your PATH and reference it in your `AGENTS.md` / `GEMINI.md`.
+
+**Example — agent lists windows and clicks one:**
+```bash
+$ gui-tool windows list
+{"status":"success","windows":[{"id":2045481940,"title":"Text Editor","pid":272151}, ...]}
+
+$ gui-tool windows raise 2045481940
+{"status":"success"}
+
+$ gui-tool mouse move 500 300
+{"status":"success"}
+
+$ gui-tool mouse click
+{"status":"success"}
+```
+
+**Example — agent takes a cropped window screenshot:**
+```bash
+$ gui-tool screenshot --window "Firefox" --output /tmp/firefox.png
+{"status":"success","path":"/tmp/firefox.png","window":{...},"bounds":{"x":100,"y":200,"width":800,"height":600}}
+```
 
 ## Install
 
@@ -14,7 +51,7 @@ Requires the [Rust toolchain](https://rustup.rs/).
 
 ```bash
 git clone https://github.com/zachr-ux/agent-desktop-interface
-cd gui-tool
+cd agent-desktop-interface
 ./setup.sh
 ```
 
@@ -52,7 +89,7 @@ sudo ln -s $(pwd)/target/release/gui-tool /usr/local/bin/gui-tool
 Copy-Item target\release\gui-tool.exe C:\Windows\System32\
 ```
 
-## Usage
+## Commands
 
 ### Screenshots
 
@@ -60,14 +97,14 @@ Copy-Item target\release\gui-tool.exe C:\Windows\System32\
 # Full screen
 gui-tool screenshot --output /tmp/screen.png
 
-# Raise a window by title, then screenshot
+# Cropped to a specific window
 gui-tool screenshot --window "Firefox" --output /tmp/firefox.png
 ```
 
 ### Window Management
 
 ```bash
-# List all windows (returns JSON with IDs, titles, workspace info)
+# List all windows (IDs, titles, workspace info)
 gui-tool windows list
 
 # Bring a window to front by ID
@@ -98,59 +135,33 @@ gui-tool key press "ctrl+shift+t"
 gui-tool key press "super"
 ```
 
-## Output Format
-
-Success (stdout):
-```json
-{"status":"success","path":"/tmp/screen.png"}
-```
-
-Error (stderr):
-```json
-{"status":"error","message":"Failed to open /dev/uinput: Permission denied. Is user in 'input' group?"}
-```
-
 ## How It Works
 
 Everything is implemented from scratch using only Rust's standard library:
 
-- **Mouse/Keyboard**: Writes `input_event` structs to `/dev/uinput` via `ioctl` syscalls (inline assembly, syscall 16 on x86_64)
-- **D-Bus**: Full wire protocol implementation over Unix domain sockets — SASL EXTERNAL auth, message framing, type marshalling, method calls, signal reception
-- **Screenshots**: XDG Desktop Portal via raw D-Bus — predicts request handle, subscribes to Response signal, waits for URI
-- **Windows (Linux)**: Calls the [window-calls](https://github.com/ickyicky/window-calls) GNOME Shell extension over D-Bus
-- **Input (macOS)**: CoreGraphics event injection (`CGEventCreateMouseEvent`, `CGEventCreateKeyboardEvent`)
-- **Screenshots (macOS)**: `CGWindowListCreateImage` with native window cropping
-- **Windows (macOS)**: `CGWindowListCopyWindowInfo` + Objective-C runtime for window activation
-- **Input (Windows)**: `SendInput` from user32.dll for mouse and keyboard injection
-- **Screenshots (Windows)**: `BitBlt` + `GetDIBits` from gdi32.dll, raw pixel extraction to PNG
-- **Windows (Windows)**: `EnumWindows` + `SetForegroundWindow` from user32.dll
+### Linux
+- **Input**: `/dev/uinput` kernel interface via inline assembly ioctl syscalls
+- **D-Bus**: Full wire protocol — SASL auth, message framing, type marshalling
+- **Screenshots**: XDG Desktop Portal via raw D-Bus
+- **Windows**: [window-calls](https://github.com/ickyicky/window-calls) GNOME extension via D-Bus
 
-Zero crates. Zero subprocess calls. ~3,500 lines of Rust.
+### macOS
+- **Input**: `CGEventCreateMouseEvent` / `CGEventCreateKeyboardEvent` via CoreGraphics FFI
+- **Screenshots**: `CGWindowListCreateImage` with native window cropping
+- **Windows**: `CGWindowListCopyWindowInfo` + Objective-C runtime for activation
+
+### Windows
+- **Input**: `SendInput` from user32.dll
+- **Screenshots**: `BitBlt` + `GetDIBits` from gdi32.dll
+- **Windows**: `EnumWindows` + `SetForegroundWindow` from user32.dll
 
 ## Requirements
 
-### Linux
-- GNOME on Wayland
-- User in `input` group + udev rule (for mouse/keyboard)
-- window-calls GNOME extension (for window management)
-- XDG Desktop Portal (for screenshots — included in GNOME by default)
-
-### macOS
-- macOS 10.15+
-- Accessibility permission (System Settings > Privacy & Security > Accessibility) — required for mouse/keyboard input
-- Screen Recording permission (System Settings > Privacy & Security > Screen Recording) — required for screenshots
-
-### Windows
-- Windows 8+
-- No special permissions required
-
-## AI Agent Integration
-
-A skill definition following the [open Agent Skills standard](https://agents.md/) is included in `skills/SKILL.md`. It works with any agent that supports the standard, including Codex, Gemini CLI, and others.
-
-To install, copy `skills/` to your agent's skill directory. The agent will automatically discover gui-tool and use it when it needs to interact with the desktop.
-
-Or just add gui-tool to your PATH and mention it in your project's `AGENTS.md` / `GEMINI.md` — most agents will figure it out from the `--help` output and JSON responses.
+| Platform | Version | Setup |
+|----------|---------|-------|
+| Linux | GNOME/Wayland | `input` group + udev rule + window-calls extension |
+| macOS | 10.15+ | Accessibility + Screen Recording permissions |
+| Windows | 8+ | None |
 
 ## License
 
