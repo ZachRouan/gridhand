@@ -87,8 +87,8 @@ fn extract_window_flags(args: &[String]) -> Result<(Vec<String>, Option<(u64, i3
 /// Larger images get denser grids; smaller (zoomed) images get coarser grids.
 /// Grid cells target ~40px minimum to keep labels readable while maximizing precision.
 fn auto_grid(width: u32, height: u32) -> (u32, u32) {
-    let max_cols = (width / 40).max(2).min(8);
-    let max_rows = (height / 40).max(2).min(6);
+    let max_cols = (width / 40).max(3).min(8);
+    let max_rows = (height / 40).max(3).min(6);
     (max_cols, max_rows)
 }
 
@@ -509,8 +509,8 @@ mod tests {
         assert_eq!(auto_grid(160, 133), (4, 3));
         // Medium: 640/40=16 clamped to 8, 400/40=10 clamped to 6
         assert_eq!(auto_grid(640, 400), (8, 6));
-        // Small: 80/40=2, 80/40=2
-        assert_eq!(auto_grid(80, 80), (2, 2));
+        // Small: 80/40=2 clamped to 3, 80/40=2 clamped to 3
+        assert_eq!(auto_grid(80, 80), (3, 3));
     }
 
     #[test]
