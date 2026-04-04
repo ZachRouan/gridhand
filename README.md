@@ -20,11 +20,37 @@ Also works as a standalone CLI tool for shell scripts and automation.
 
 ## Agent Integration
 
-A skill definition following the [open Agent Skills standard](https://agents.md/) is included in [`skills/SKILL.md`](skills/SKILL.md). It works with any compatible agent, including Codex, Gemini CLI, and others.
+gui-tool ships as a **Claude Code plugin** with a built-in skill definition. It also follows the [open Agent Skills standard](https://agents.md/) and works with Codex, Gemini CLI, and other compatible agents.
 
-**Quick setup:** Copy `skills/` to your agent's skill directory, or add gui-tool to your PATH and reference it in your `AGENTS.md` / `GEMINI.md`.
+### Claude Code (plugin install)
 
-**Example — agent lists windows and clicks one:**
+```bash
+# 1. Clone and build
+git clone https://github.com/zachr-ux/agent-desktop-interface
+cd agent-desktop-interface
+./setup.sh
+
+# 2. Copy the plugin to your Claude Code skills directory
+cp -r . ~/.claude/skills/gui-tool
+
+# 3. Restart Claude Code — the plugin is auto-discovered
+```
+
+The plugin manifest (`.claude-plugin/plugin.json`) and skill definition (`skills/gui-tool/SKILL.md`) are included in the repo. Once copied, the skill appears in `/skills` as `gui-tool:gui-tool`.
+
+### Other agents (Codex, Gemini CLI, etc.)
+
+Add gui-tool to your PATH and reference the skill in your `AGENTS.md` or `GEMINI.md`:
+
+```bash
+sudo ln -s $(pwd)/target/release/gui-tool /usr/local/bin/gui-tool
+```
+
+The skill definition is at [`skills/gui-tool/SKILL.md`](skills/gui-tool/SKILL.md).
+
+### Examples
+
+**Agent lists windows and clicks one:**
 ```bash
 $ gui-tool windows list
 {"status":"success","windows":[{"id":2045481940,"title":"Text Editor","pid":272151}, ...]}
@@ -39,7 +65,7 @@ $ gui-tool mouse click
 {"status":"success"}
 ```
 
-**Example — agent takes a cropped window screenshot:**
+**Agent takes a cropped window screenshot:**
 ```bash
 $ gui-tool screenshot --window "Firefox" --output /tmp/firefox.png
 {"status":"success","path":"/tmp/firefox.png","window":{...},"bounds":{"x":100,"y":200,"width":800,"height":600}}
@@ -56,6 +82,8 @@ cd agent-desktop-interface
 ```
 
 The setup script detects your OS, handles platform-specific setup, and builds the release binary.
+
+To use as a Claude Code plugin, copy the repo to `~/.claude/skills/gui-tool` after building (see [Agent Integration](#agent-integration) above).
 
 ### Linux
 
