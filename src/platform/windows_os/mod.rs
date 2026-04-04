@@ -11,6 +11,14 @@ pub fn screenshot_window(title: &str, output: &str) -> Result<String, String> {
     screenshot::screenshot_window(title, output)
 }
 
+pub fn screenshot_window_by_id(id: u64, output: &str) -> Result<String, String> {
+    screenshot::screenshot_window_by_id(id, output)
+}
+
+pub fn find_window_by_title(title: &str) -> Result<Option<(u64, String)>, String> {
+    windows::find_window_by_title(title)
+}
+
 pub fn list_windows() -> Result<String, String> {
     windows::list_windows()
 }

@@ -11,6 +11,16 @@ pub fn screenshot_window(title: &str, output: &str) -> Result<String, String> {
     screenshot::screenshot_window(title, output)
 }
 
+pub fn screenshot_window_by_id(id: u64, output: &str) -> Result<String, String> {
+    screenshot::screenshot_window_by_id(id, output)
+}
+
+pub fn find_window_by_title(title: &str) -> Result<Option<(u64, String)>, String> {
+    let mut conn = dbus::DbusConnection::connect()?;
+    windows::find_window_by_title(&mut conn, title)
+        .map(|opt| opt.map(|(id, json)| (id as u64, json)))
+}
+
 pub fn list_windows() -> Result<String, String> {
     windows::list_windows()
 }
