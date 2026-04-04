@@ -88,7 +88,7 @@ The grid system eliminates pixel coordinate guessing. The agent reads cell label
 ```bash
 gui-tool screenshot --window-id 123 --grid --output /tmp/grid.png
 ```
-The screenshot has a labeled 4x3 grid overlay (cells A1 through D3).
+The screenshot has a labeled 8x6 grid overlay (cells A1 through D3).
 
 ### Step 2: Identify the target cell
 Read the grid image. Find which cell contains your target (e.g., the button is in B2).
@@ -100,6 +100,11 @@ gui-tool screenshot --window-id 123 --grid --cell B2 --output /tmp/zoom.png
 ```
 This crops to cell B2 and draws a new sub-grid. Find the sub-cell (e.g., C1).
 
+You can zoom multiple levels with dot notation:
+```bash
+gui-tool screenshot --window-id 123 --grid --cell B2.C1 --output /tmp/zoom2.png
+```
+
 ### Step 4: Click
 ```bash
 gui-tool mouse move --cell B2.C1 --window-id 123
@@ -109,7 +114,7 @@ The tool calculates the center of cell C1 within cell B2 and moves there.
 
 ### Key rules
 - **No pixel math.** Cell references from grid images map directly to mouse positions.
-- **Default grid is 4x3.** Override with `--grid 6x4` for denser grids.
+- **Default grid is 8x6.** Override with `--grid 6x4` for denser grids.
 - **Dot notation for recursive zoom.** `B2.C1` means "cell C1 within cell B2."
 - **`--grid` density must match.** If you used `--grid 6x4` for the screenshot, pass `--grid 6x4` to `mouse move` too.
 

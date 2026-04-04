@@ -164,7 +164,7 @@ When `--window` or `--window-id` is used with `mouse move`, coordinates are rela
 ### Grid Targeting (for AI agents)
 
 ```bash
-# Screenshot with labeled grid overlay (default 4x3)
+# Screenshot with labeled grid overlay (default 8x6)
 gui-tool screenshot --window-id 123 --grid --output /tmp/grid.png
 
 # Custom grid density

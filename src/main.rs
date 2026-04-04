@@ -83,7 +83,7 @@ fn extract_window_flags(args: &[String]) -> Result<(Vec<String>, Option<(u64, i3
     }
 }
 
-/// Parse a grid density string like "4x3" into (cols, rows).
+/// Parse a grid density string like "8x6" into (cols, rows).
 fn parse_grid(s: &str) -> Result<(u32, u32), String> {
     let parts: Vec<&str> = s.split('x').collect();
     if parts.len() != 2 {
@@ -188,10 +188,10 @@ fn cmd_screenshot(args: &[String]) -> Result<String, String> {
                         grid = Some(parse_grid(next)?);
                         i += 1;
                     } else {
-                        grid = Some((4, 3)); // default
+                        grid = Some((8, 6)); // default
                     }
                 } else {
-                    grid = Some((4, 3)); // default
+                    grid = Some((8, 6)); // default
                 }
             }
             "--cell" => {
@@ -221,25 +221,25 @@ fn cmd_screenshot(args: &[String]) -> Result<String, String> {
     // Post-process: apply cell crop and/or grid overlay
     if cell.is_some() || grid.is_some() {
         let mut img = platform::png::read_png(output)?;
-        let (cols, rows) = grid.unwrap_or((4, 3));
+        let (cols, rows) = grid.unwrap_or((8, 6));
 
-        // If --cell is specified, crop to that cell first
-        if let Some(cell_ref) = &cell {
-            let (col, row) = parse_cell_ref(cell_ref)?;
-            if col >= cols || row >= rows {
-                return Err(format!("Cell '{}' out of range for {}x{} grid", cell_ref, cols, rows));
+        // If --cell is specified, recursively crop through dot-separated refs
+        if let Some(cell_chain) = &cell {
+            for part in cell_chain.split('.') {
+                let (col, row) = parse_cell_ref(part)?;
+                if col >= cols || row >= rows {
+                    return Err(format!("Cell '{}' out of range for {}x{} grid", part, cols, rows));
+                }
+                let cell_w = img.width / cols;
+                let cell_h = img.height / rows;
+                let cx = col * cell_w;
+                let cy = row * cell_h;
+                img = platform::png::crop(&img, cx, cy, cell_w, cell_h)?;
             }
-            let cell_w = img.width / cols;
-            let cell_h = img.height / rows;
-            let cx = col * cell_w;
-            let cy = row * cell_h;
-            img = platform::png::crop(&img, cx, cy, cell_w, cell_h)?;
         }
 
-        // Draw grid overlay on the (possibly cropped) image
-        if grid.is_some() {
-            platform::png::draw_grid(&mut img, cols, rows);
-        }
+        // Draw grid overlay on the final (possibly cropped) image
+        platform::png::draw_grid(&mut img, cols, rows);
 
         platform::png::write_png(output, &img)?;
     }
@@ -280,7 +280,7 @@ fn cmd_mouse(args: &[String]) -> Result<String, String> {
     // Extract --cell and --grid from remaining args
     let mut positional = Vec::new();
     let mut cell: Option<String> = None;
-    let mut grid_density: (u32, u32) = (4, 3);
+    let mut grid_density: (u32, u32) = (8, 6);
     let mut i = 0;
     while i < remaining.len() {
         match remaining[i].as_str() {
