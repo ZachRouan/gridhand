@@ -647,6 +647,192 @@ fn crc32(data: &[u8]) -> u32 {
 }
 
 // ---------------------------------------------------------------------------
+// Bitmap font and grid overlay
+// ---------------------------------------------------------------------------
+
+/// 6x8 bitmap font glyphs for grid labels. Each glyph is 8 bytes (one per row).
+/// Bits are MSB-first, 6 bits per row.
+#[allow(dead_code)]
+const FONT_GLYPHS: &[(char, [u8; 8])] = &[
+    ('A', [0b00110000, 0b01001000, 0b10000100, 0b10000100, 0b11111100, 0b10000100, 0b10000100, 0b00000000]),
+    ('B', [0b11111000, 0b10000100, 0b10000100, 0b11111000, 0b10000100, 0b10000100, 0b11111000, 0b00000000]),
+    ('C', [0b01111000, 0b10000100, 0b10000000, 0b10000000, 0b10000000, 0b10000100, 0b01111000, 0b00000000]),
+    ('D', [0b11110000, 0b10001000, 0b10000100, 0b10000100, 0b10000100, 0b10001000, 0b11110000, 0b00000000]),
+    ('E', [0b11111100, 0b10000000, 0b10000000, 0b11111000, 0b10000000, 0b10000000, 0b11111100, 0b00000000]),
+    ('F', [0b11111100, 0b10000000, 0b10000000, 0b11111000, 0b10000000, 0b10000000, 0b10000000, 0b00000000]),
+    ('G', [0b01111000, 0b10000100, 0b10000000, 0b10011100, 0b10000100, 0b10000100, 0b01111000, 0b00000000]),
+    ('H', [0b10000100, 0b10000100, 0b10000100, 0b11111100, 0b10000100, 0b10000100, 0b10000100, 0b00000000]),
+    ('I', [0b01111000, 0b00110000, 0b00110000, 0b00110000, 0b00110000, 0b00110000, 0b01111000, 0b00000000]),
+    ('J', [0b00111100, 0b00001000, 0b00001000, 0b00001000, 0b00001000, 0b10001000, 0b01110000, 0b00000000]),
+    ('K', [0b10000100, 0b10001000, 0b10010000, 0b11100000, 0b10010000, 0b10001000, 0b10000100, 0b00000000]),
+    ('L', [0b10000000, 0b10000000, 0b10000000, 0b10000000, 0b10000000, 0b10000000, 0b11111100, 0b00000000]),
+    ('M', [0b10000100, 0b11001100, 0b10110100, 0b10000100, 0b10000100, 0b10000100, 0b10000100, 0b00000000]),
+    ('N', [0b10000100, 0b11000100, 0b10100100, 0b10010100, 0b10001100, 0b10000100, 0b10000100, 0b00000000]),
+    ('O', [0b01111000, 0b10000100, 0b10000100, 0b10000100, 0b10000100, 0b10000100, 0b01111000, 0b00000000]),
+    ('P', [0b11111000, 0b10000100, 0b10000100, 0b11111000, 0b10000000, 0b10000000, 0b10000000, 0b00000000]),
+    ('Q', [0b01111000, 0b10000100, 0b10000100, 0b10000100, 0b10010100, 0b10001000, 0b01110100, 0b00000000]),
+    ('R', [0b11111000, 0b10000100, 0b10000100, 0b11111000, 0b10010000, 0b10001000, 0b10000100, 0b00000000]),
+    ('S', [0b01111000, 0b10000100, 0b10000000, 0b01111000, 0b00000100, 0b10000100, 0b01111000, 0b00000000]),
+    ('T', [0b11111100, 0b00110000, 0b00110000, 0b00110000, 0b00110000, 0b00110000, 0b00110000, 0b00000000]),
+    ('U', [0b10000100, 0b10000100, 0b10000100, 0b10000100, 0b10000100, 0b10000100, 0b01111000, 0b00000000]),
+    ('V', [0b10000100, 0b10000100, 0b10000100, 0b10000100, 0b01001000, 0b00110000, 0b00110000, 0b00000000]),
+    ('W', [0b10000100, 0b10000100, 0b10000100, 0b10000100, 0b10110100, 0b11001100, 0b10000100, 0b00000000]),
+    ('X', [0b10000100, 0b01001000, 0b00110000, 0b00110000, 0b00110000, 0b01001000, 0b10000100, 0b00000000]),
+    ('Y', [0b10000100, 0b01001000, 0b00110000, 0b00110000, 0b00110000, 0b00110000, 0b00110000, 0b00000000]),
+    ('Z', [0b11111100, 0b00001000, 0b00010000, 0b00110000, 0b01000000, 0b10000000, 0b11111100, 0b00000000]),
+    ('0', [0b01111000, 0b10001100, 0b10010100, 0b10100100, 0b11000100, 0b10000100, 0b01111000, 0b00000000]),
+    ('1', [0b00110000, 0b01110000, 0b00110000, 0b00110000, 0b00110000, 0b00110000, 0b11111100, 0b00000000]),
+    ('2', [0b01111000, 0b10000100, 0b00000100, 0b00111000, 0b01000000, 0b10000000, 0b11111100, 0b00000000]),
+    ('3', [0b01111000, 0b10000100, 0b00000100, 0b00111000, 0b00000100, 0b10000100, 0b01111000, 0b00000000]),
+    ('4', [0b00001000, 0b00011000, 0b00101000, 0b01001000, 0b11111100, 0b00001000, 0b00001000, 0b00000000]),
+    ('5', [0b11111100, 0b10000000, 0b11111000, 0b00000100, 0b00000100, 0b10000100, 0b01111000, 0b00000000]),
+    ('6', [0b01111000, 0b10000000, 0b10000000, 0b11111000, 0b10000100, 0b10000100, 0b01111000, 0b00000000]),
+    ('7', [0b11111100, 0b00000100, 0b00001000, 0b00010000, 0b00100000, 0b00100000, 0b00100000, 0b00000000]),
+    ('8', [0b01111000, 0b10000100, 0b10000100, 0b01111000, 0b10000100, 0b10000100, 0b01111000, 0b00000000]),
+    ('9', [0b01111000, 0b10000100, 0b10000100, 0b01111100, 0b00000100, 0b00000100, 0b01111000, 0b00000000]),
+];
+
+#[allow(dead_code)]
+const GLYPH_WIDTH: u32 = 6;
+#[allow(dead_code)]
+const GLYPH_HEIGHT: u32 = 8;
+#[allow(dead_code)]
+const LABEL_SCALE: u32 = 2; // render glyphs at 2x for readability
+#[allow(dead_code)]
+const LABEL_PADDING: u32 = 5;
+
+#[allow(dead_code)]
+fn get_glyph(c: char) -> Option<&'static [u8; 8]> {
+    FONT_GLYPHS.iter().find(|(ch, _)| *ch == c).map(|(_, g)| g)
+}
+
+/// Draw a labeled grid overlay on an image.
+/// Columns are labeled A, B, C...; rows are labeled 1, 2, 3...
+#[allow(dead_code)]
+pub fn draw_grid(img: &mut Image, cols: u32, rows: u32) {
+    let w = img.width;
+    let h = img.height;
+    let cell_w = w / cols;
+    let cell_h = h / rows;
+
+    // Draw vertical grid lines
+    for col in 1..cols {
+        let x = col * cell_w;
+        draw_vertical_line(img, x, 0, h);
+    }
+
+    // Draw horizontal grid lines
+    for row in 1..rows {
+        let y = row * cell_h;
+        draw_horizontal_line(img, 0, w, y);
+    }
+
+    // Draw labels
+    for row in 0..rows {
+        for col in 0..cols {
+            let label_col = (b'A' + col as u8) as char;
+            let label_row_char = (b'1' + row as u8) as char;
+
+            let lx = col * cell_w + LABEL_PADDING;
+            let ly = row * cell_h + LABEL_PADDING;
+
+            // Draw background rectangle behind label
+            let bg_w = GLYPH_WIDTH * LABEL_SCALE * 2 + LABEL_PADDING * 2;
+            let bg_h = GLYPH_HEIGHT * LABEL_SCALE + LABEL_PADDING;
+            draw_filled_rect(img, lx, ly, bg_w, bg_h, [0, 0, 0, 200]);
+
+            // Draw the two characters (e.g., "A1")
+            draw_char(img, label_col, lx + LABEL_PADDING, ly + LABEL_PADDING / 2);
+            draw_char(img, label_row_char, lx + LABEL_PADDING + GLYPH_WIDTH * LABEL_SCALE + 1, ly + LABEL_PADDING / 2);
+        }
+    }
+}
+
+#[allow(dead_code)]
+fn draw_vertical_line(img: &mut Image, x: u32, y_start: u32, y_end: u32) {
+    for y in y_start..y_end.min(img.height) {
+        // Black border
+        for dx in [0i32, 2] {
+            let px = (x as i32 + dx) as u32;
+            if px < img.width {
+                set_pixel(img, px, y, [0, 0, 0, 255]);
+            }
+        }
+        // White center
+        if x + 1 < img.width {
+            set_pixel(img, x + 1, y, [255, 255, 255, 255]);
+        }
+    }
+}
+
+#[allow(dead_code)]
+fn draw_horizontal_line(img: &mut Image, x_start: u32, x_end: u32, y: u32) {
+    for x in x_start..x_end.min(img.width) {
+        for dy in [0i32, 2] {
+            let py = (y as i32 + dy) as u32;
+            if py < img.height {
+                set_pixel(img, x, py, [0, 0, 0, 255]);
+            }
+        }
+        if y + 1 < img.height {
+            set_pixel(img, x, y + 1, [255, 255, 255, 255]);
+        }
+    }
+}
+
+#[allow(dead_code)]
+fn draw_filled_rect(img: &mut Image, x: u32, y: u32, w: u32, h: u32, color: [u8; 4]) {
+    for dy in 0..h {
+        for dx in 0..w {
+            let px = x + dx;
+            let py = y + dy;
+            if px < img.width && py < img.height {
+                set_pixel(img, px, py, color);
+            }
+        }
+    }
+}
+
+#[allow(dead_code)]
+fn draw_char(img: &mut Image, c: char, x: u32, y: u32) {
+    let glyph = match get_glyph(c) {
+        Some(g) => g,
+        None => return,
+    };
+    for row in 0..GLYPH_HEIGHT {
+        let bits = glyph[row as usize];
+        for col in 0..GLYPH_WIDTH {
+            if bits & (0x80 >> col) != 0 {
+                // Draw at LABEL_SCALE size
+                for sy in 0..LABEL_SCALE {
+                    for sx in 0..LABEL_SCALE {
+                        let px = x + col * LABEL_SCALE + sx;
+                        let py = y + row * LABEL_SCALE + sy;
+                        if px < img.width && py < img.height {
+                            set_pixel(img, px, py, [255, 255, 255, 255]);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[allow(dead_code)]
+fn set_pixel(img: &mut Image, x: u32, y: u32, color: [u8; 4]) {
+    let bpp = img.bpp as usize;
+    let idx = (y * img.width * img.bpp + x * img.bpp) as usize;
+    if idx + bpp <= img.pixels.len() {
+        img.pixels[idx] = color[0];
+        img.pixels[idx + 1] = color[1];
+        img.pixels[idx + 2] = color[2];
+        if bpp == 4 {
+            img.pixels[idx + 3] = color[3];
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -725,5 +911,37 @@ mod tests {
         let zlib = zlib_stored(input);
         let result = zlib_decompress(&zlib).unwrap();
         assert_eq!(result, input);
+    }
+
+    #[test]
+    fn test_draw_grid_no_panic() {
+        let mut img = Image {
+            width: 120,
+            height: 80,
+            bpp: 3,
+            pixels: vec![128u8; 120 * 80 * 3],
+        };
+        draw_grid(&mut img, 4, 3);
+        // Verify the image dimensions are unchanged
+        assert_eq!(img.width, 120);
+        assert_eq!(img.height, 80);
+        assert_eq!(img.pixels.len(), 120 * 80 * 3);
+        // Verify grid lines were drawn (center of first vertical line should be white)
+        // Check at y=40 to avoid the label background rectangle which covers top-left area
+        let line_x = 30u32; // 120/4 = 30
+        let idx = (40 * 120 * 3 + (line_x + 1) * 3) as usize;
+        assert_eq!(img.pixels[idx], 255); // white line center
+    }
+
+    #[test]
+    fn test_draw_grid_rgba() {
+        let mut img = Image {
+            width: 160,
+            height: 120,
+            bpp: 4,
+            pixels: vec![128u8; 160 * 120 * 4],
+        };
+        draw_grid(&mut img, 4, 3);
+        assert_eq!(img.pixels.len(), 160 * 120 * 4);
     }
 }
