@@ -84,7 +84,6 @@ fn extract_window_flags(args: &[String]) -> Result<(Vec<String>, Option<(u64, i3
 }
 
 /// Parse a grid density string like "4x3" into (cols, rows).
-#[allow(dead_code)]
 fn parse_grid(s: &str) -> Result<(u32, u32), String> {
     let parts: Vec<&str> = s.split('x').collect();
     if parts.len() != 2 {
@@ -99,7 +98,6 @@ fn parse_grid(s: &str) -> Result<(u32, u32), String> {
 }
 
 /// Parse a single cell reference like "B2" into (col, row) zero-indexed.
-#[allow(dead_code)]
 fn parse_cell_ref(s: &str) -> Result<(u32, u32), String> {
     let bytes = s.as_bytes();
     if bytes.len() < 2 || bytes.len() > 3 {
@@ -122,7 +120,6 @@ fn parse_cell_ref(s: &str) -> Result<(u32, u32), String> {
 /// Compute absolute screen coordinates from a cell chain like "B2.C1".
 /// Uses f64 throughout to avoid integer division drift.
 /// Returns the center point of the innermost cell.
-#[allow(dead_code)]
 fn cell_to_coords(
     cell_chain: &str,
     bounds_x: i32,
@@ -161,6 +158,8 @@ fn cmd_screenshot(args: &[String]) -> Result<String, String> {
     let mut output_path: Option<String> = None;
     let mut window_title: Option<String> = None;
     let mut window_id: Option<u64> = None;
+    let mut grid: Option<(u32, u32)> = None;
+    let mut cell: Option<String> = None;
     let mut i = 0;
 
     while i < args.len() {
@@ -168,27 +167,36 @@ fn cmd_screenshot(args: &[String]) -> Result<String, String> {
             "--window" => {
                 i += 1;
                 window_title = Some(
-                    args.get(i)
-                        .ok_or("--window requires a title argument")?
-                        .clone(),
+                    args.get(i).ok_or("--window requires a title argument")?.clone(),
                 );
             }
             "--window-id" => {
                 i += 1;
-                let id_str = args.get(i)
-                    .ok_or("--window-id requires a numeric ID argument")?;
-                window_id = Some(
-                    id_str.parse::<u64>()
-                        .map_err(|_| format!("Invalid window ID: {}", id_str))?,
-                );
+                let id_str = args.get(i).ok_or("--window-id requires a numeric ID argument")?;
+                window_id = Some(id_str.parse::<u64>().map_err(|_| format!("Invalid window ID: {}", id_str))?);
             }
             "--output" => {
                 i += 1;
                 output_path = Some(
-                    args.get(i)
-                        .ok_or("--output requires a path argument")?
-                        .clone(),
+                    args.get(i).ok_or("--output requires a path argument")?.clone(),
                 );
+            }
+            "--grid" => {
+                // Check if next arg is a WxH value or another flag
+                if let Some(next) = args.get(i + 1) {
+                    if !next.starts_with('-') && next.contains('x') {
+                        grid = Some(parse_grid(next)?);
+                        i += 1;
+                    } else {
+                        grid = Some((4, 3)); // default
+                    }
+                } else {
+                    grid = Some((4, 3)); // default
+                }
+            }
+            "--cell" => {
+                i += 1;
+                cell = Some(args.get(i).ok_or("--cell requires a cell reference (e.g., B2)")?.clone());
             }
             _ => return Err(format!("Unknown flag: {}", args[i])),
         }
@@ -199,17 +207,45 @@ fn cmd_screenshot(args: &[String]) -> Result<String, String> {
         return Err("Cannot use both --window and --window-id".to_string());
     }
 
-    let output = output_path
-        .as_deref()
-        .unwrap_or("/tmp/gui-tool-screenshot.png");
+    let output = output_path.as_deref().unwrap_or("/tmp/gui-tool-screenshot.png");
 
-    if let Some(title) = &window_title {
-        platform::screenshot_window(title, output)
+    // Take the screenshot
+    let result = if let Some(title) = &window_title {
+        platform::screenshot_window(title, output)?
     } else if let Some(id) = window_id {
-        platform::screenshot_window_by_id(id, output)
+        platform::screenshot_window_by_id(id, output)?
     } else {
-        platform::screenshot_full(output)
+        platform::screenshot_full(output)?
+    };
+
+    // Post-process: apply cell crop and/or grid overlay
+    if cell.is_some() || grid.is_some() {
+        let mut img = platform::png::read_png(output)?;
+        let (cols, rows) = grid.unwrap_or((4, 3));
+
+        // If --cell is specified, crop to that cell first
+        if let Some(cell_ref) = &cell {
+            let (col, row) = parse_cell_ref(cell_ref)?;
+            if col >= cols || row >= rows {
+                return Err(format!("Cell '{}' out of range for {}x{} grid", cell_ref, cols, rows));
+            }
+            let cell_w = img.width / cols;
+            let cell_h = img.height / rows;
+            let cx = col * cell_w;
+            let cy = row * cell_h;
+            img = platform::png::crop(&img, cx, cy, cell_w, cell_h)?;
+        }
+
+        // Draw grid overlay on the (possibly cropped) image
+        if grid.is_some() {
+            platform::png::draw_grid(&mut img, cols, rows);
+        }
+
+        platform::png::write_png(output, &img)?;
     }
+
+    // Print the original JSON result (path, bounds, etc.)
+    Ok(result)
 }
 
 fn cmd_windows(args: &[String]) -> Result<String, String> {
@@ -235,37 +271,77 @@ fn cmd_mouse(args: &[String]) -> Result<String, String> {
         return Err("Usage: gui-tool mouse <move|click> [args...]".to_string());
     }
 
-    // First arg is the subcommand
     let subcmd = args[0].as_str();
     let sub_args = &args[1..];
 
-    // Extract window flags from the remaining args
+    // Extract window flags (also extracts --grid and --cell from remaining)
     let (remaining, window_info) = extract_window_flags(sub_args)?;
+
+    // Extract --cell and --grid from remaining args
+    let mut positional = Vec::new();
+    let mut cell: Option<String> = None;
+    let mut grid_density: (u32, u32) = (4, 3);
+    let mut i = 0;
+    while i < remaining.len() {
+        match remaining[i].as_str() {
+            "--cell" => {
+                i += 1;
+                cell = Some(remaining.get(i).ok_or("--cell requires a cell reference")?.clone());
+            }
+            "--grid" => {
+                if let Some(next) = remaining.get(i + 1) {
+                    if !next.starts_with('-') && next.contains('x') {
+                        grid_density = parse_grid(next)?;
+                        i += 1;
+                    }
+                }
+            }
+            "--button" => {
+                positional.push(remaining[i].clone());
+                i += 1;
+                if let Some(val) = remaining.get(i) {
+                    positional.push(val.clone());
+                }
+            }
+            _ => {
+                positional.push(remaining[i].clone());
+            }
+        }
+        i += 1;
+    }
 
     match subcmd {
         "move" => {
-            let mut x: i32 = remaining.get(0)
-                .ok_or("Usage: gui-tool mouse move <x> <y>")?
-                .parse().map_err(|_| "Invalid x coordinate")?;
-            let mut y: i32 = remaining.get(1)
-                .ok_or("Usage: gui-tool mouse move <x> <y>")?
-                .parse().map_err(|_| "Invalid y coordinate")?;
+            if let Some(cell_ref) = &cell {
+                // Cell-based targeting — requires window bounds
+                let (_, wx, wy, ww, wh) = window_info
+                    .ok_or("--cell requires --window or --window-id to know the target window")?;
+                let (x, y) = cell_to_coords(cell_ref, wx, wy, ww, wh, grid_density.0, grid_density.1)?;
+                platform::mouse_move(x, y)
+            } else {
+                // Coordinate-based targeting
+                let mut x: i32 = positional.get(0)
+                    .ok_or("Usage: gui-tool mouse move <x> <y> or --cell <ref>")?
+                    .parse().map_err(|_| "Invalid x coordinate")?;
+                let mut y: i32 = positional.get(1)
+                    .ok_or("Usage: gui-tool mouse move <x> <y>")?
+                    .parse().map_err(|_| "Invalid y coordinate")?;
 
-            if let Some((_, wx, wy, _, _)) = window_info {
-                x += wx;
-                y += wy;
+                if let Some((_, wx, wy, _, _)) = window_info {
+                    x += wx;
+                    y += wy;
+                }
+                platform::mouse_move(x, y)
             }
-
-            platform::mouse_move(x, y)
         }
         "click" => {
             let mut button = "left";
-            let mut i = 0;
-            while i < remaining.len() {
-                match remaining[i].as_str() {
+            let mut j = 0;
+            while j < positional.len() {
+                match positional[j].as_str() {
                     "--button" => {
-                        i += 1;
-                        if let Some(b) = remaining.get(i) {
+                        j += 1;
+                        if let Some(b) = positional.get(j) {
                             button = b.as_str();
                         }
                     }
@@ -273,7 +349,7 @@ fn cmd_mouse(args: &[String]) -> Result<String, String> {
                         button = other;
                     }
                 }
-                i += 1;
+                j += 1;
             }
             platform::mouse_click(button)
         }
