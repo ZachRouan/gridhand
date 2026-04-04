@@ -1,6 +1,14 @@
 #!/bin/bash
 set -e
 
+# Must not be run as root — only specific commands use sudo
+if [ "$(id -u)" -eq 0 ]; then
+    echo "Do not run this script as root or with sudo. It will prompt for sudo when needed."
+    exit 1
+fi
+
+REAL_USER="$(id -un)"
+
 echo "=== gui-tool setup ==="
 
 # 1. uinput access
@@ -16,8 +24,8 @@ else
 fi
 
 if ! groups | grep -q input; then
-    sudo usermod -aG input $USER
-    echo "Added $USER to 'input' group. You must log out and back in for this to take effect."
+    sudo usermod -aG input "$REAL_USER"
+    echo "Added $REAL_USER to 'input' group. You must log out and back in for this to take effect."
 else
     echo "User already in 'input' group."
 fi
@@ -25,13 +33,24 @@ fi
 # 2. GNOME window-calls extension
 echo ""
 echo "Installing window-calls GNOME extension..."
-if gnome-extensions list 2>/dev/null | grep -q "window-calls@ickyicky.github.io"; then
+EXT_UUID="window-calls@ickyicky.github.io"
+if gnome-extensions list 2>/dev/null | grep -q "$EXT_UUID"; then
     echo "window-calls extension already installed."
 else
-    gnome-extensions install window-calls@ickyicky.github.io || {
-        echo "Failed to install via gnome-extensions. Try installing from:"
+    EXT_URL="https://extensions.gnome.org/extension-data/window-calls%40ickyicky.github.io.v10.shell-extension.zip"
+    TMP_ZIP="$(mktemp /tmp/window-calls-XXXXXX.zip)"
+    echo "Downloading window-calls extension..."
+    if curl -sL "$EXT_URL" -o "$TMP_ZIP" 2>/dev/null || wget -q "$EXT_URL" -O "$TMP_ZIP" 2>/dev/null; then
+        gnome-extensions install "$TMP_ZIP" && echo "window-calls extension installed." || {
+            echo "Failed to install extension. Try manually from:"
+            echo "  https://extensions.gnome.org/extension/4724/window-calls/"
+        }
+        rm -f "$TMP_ZIP"
+    else
+        rm -f "$TMP_ZIP"
+        echo "Failed to download extension. Install manually from:"
         echo "  https://extensions.gnome.org/extension/4724/window-calls/"
-    }
+    fi
 fi
 
 # 3. Build
