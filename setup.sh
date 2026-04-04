@@ -24,8 +24,12 @@ else
 fi
 
 if ! groups | grep -q input; then
-    sudo usermod -aG input "$REAL_USER"
-    echo "Added $REAL_USER to 'input' group. You must log out and back in for this to take effect."
+    if sudo usermod -aG input "$REAL_USER"; then
+        echo "Added $REAL_USER to 'input' group. You must log out and back in for this to take effect."
+    else
+        echo "WARNING: Could not add $REAL_USER to 'input' group. Run manually:"
+        echo "  sudo usermod -aG input $REAL_USER"
+    fi
 else
     echo "User already in 'input' group."
 fi
