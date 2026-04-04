@@ -95,6 +95,14 @@ gui-tool windows list                    # find the ID
 gui-tool windows raise <id>              # bring it to front
 ```
 
+**Focus a window and interact (no race condition):**
+```bash
+gui-tool mouse click --window "Firefox"
+gui-tool key type "search query" --window-id 2045481940
+gui-tool screenshot --window-id 2045481940 --output /tmp/app.png
+```
+Use `--window` for title matching or `--window-id` for exact ID (from `windows list`).
+
 **Click a specific location:**
 ```bash
 gui-tool mouse move 500 300

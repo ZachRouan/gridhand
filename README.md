@@ -99,6 +99,9 @@ gui-tool screenshot --output /tmp/screen.png
 
 # Cropped to a specific window
 gui-tool screenshot --window "Firefox" --output /tmp/firefox.png
+
+# Screenshot by window ID (cropped)
+gui-tool screenshot --window-id 2045481940 --output /tmp/app.png
 ```
 
 ### Window Management
@@ -120,6 +123,10 @@ gui-tool mouse move 500 300
 # Click
 gui-tool mouse click
 gui-tool mouse click --button right
+
+# Focus a window first, then click (single process, no focus race)
+gui-tool mouse click --window "Firefox"
+gui-tool mouse move 500 300 --window-id 2045481940
 ```
 
 ### Keyboard
@@ -133,6 +140,10 @@ gui-tool key press "ctrl+a"
 gui-tool key press "alt+f4"
 gui-tool key press "ctrl+shift+t"
 gui-tool key press "super"
+
+# Type into a specific window
+gui-tool key type "hello" --window "Terminal"
+gui-tool key press "ctrl+a" --window-id 2045481940
 ```
 
 ## How It Works
