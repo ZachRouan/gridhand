@@ -6,6 +6,14 @@ mod platform;
 const ZOOM_MIN_WIDTH: u32 = 640;
 const ZOOM_MIN_HEIGHT: u32 = 480;
 
+/// Cache file for screenshots — reused when zooming with --cell
+/// to avoid taking redundant screenshots of an unchanged window.
+const SCREENSHOT_CACHE: &str = "/tmp/gui-tool-screenshot-cache.png";
+
+/// Maximum age of cache in seconds before a fresh screenshot is taken.
+/// Generous timeout — cache is also invalidated by mouse/key actions.
+const CACHE_MAX_AGE_SECS: u64 = 60;
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
@@ -86,6 +94,23 @@ fn extract_window_flags(args: &[String]) -> Result<(Vec<String>, Option<(u64, i3
     } else {
         Ok((remaining, None))
     }
+}
+
+/// Invalidate the screenshot cache (called after actions that change screen state).
+fn invalidate_cache() {
+    let _ = std::fs::remove_file(SCREENSHOT_CACHE);
+}
+
+/// Check if the screenshot cache file exists and is recent enough to reuse.
+fn cache_is_fresh() -> bool {
+    if let Ok(meta) = std::fs::metadata(SCREENSHOT_CACHE) {
+        if let Ok(modified) = meta.modified() {
+            if let Ok(elapsed) = modified.elapsed() {
+                return elapsed.as_secs() < CACHE_MAX_AGE_SECS;
+            }
+        }
+    }
+    false
 }
 
 /// Auto-select grid density based on image dimensions.
@@ -247,18 +272,31 @@ fn cmd_screenshot(args: &[String]) -> Result<String, String> {
 
     let output = output_path.as_deref().unwrap_or("/tmp/gui-tool-screenshot.png");
 
-    // Take the screenshot
-    let result = if let Some(title) = &window_title {
-        platform::screenshot_window(title, output)?
+    // When zooming with --cell, try to reuse cached screenshot instead of taking a new one
+    let use_cache = cell.is_some() && cache_is_fresh();
+
+    let result = if use_cache {
+        // Reuse cached screenshot — no new screenshot needed
+        json::success_with(vec![("path", json::JsonValue::Str(output))])
+    } else if let Some(title) = &window_title {
+        let r = platform::screenshot_window(title, output)?;
+        let _ = std::fs::copy(output, SCREENSHOT_CACHE);
+        r
     } else if let Some(id) = window_id {
-        platform::screenshot_window_by_id(id, output)?
+        let r = platform::screenshot_window_by_id(id, output)?;
+        let _ = std::fs::copy(output, SCREENSHOT_CACHE);
+        r
     } else {
-        platform::screenshot_full(output)?
+        let r = platform::screenshot_full(output)?;
+        let _ = std::fs::copy(output, SCREENSHOT_CACHE);
+        r
     };
 
     // Post-process: apply cell crop and/or grid overlay
     if cell.is_some() || grid_enabled {
-        let mut img = platform::png::read_png(output)?;
+        // Read from cache if available, otherwise from the output
+        let source = if use_cache { SCREENSHOT_CACHE } else { output };
+        let mut img = platform::png::read_png(source)?;
 
         // If --cell is specified, recursively crop through dot-separated refs
         if let Some(cell_chain) = &cell {
@@ -403,7 +441,9 @@ fn cmd_mouse(args: &[String]) -> Result<String, String> {
                 }
                 j += 1;
             }
-            platform::mouse_click(button)
+            let result = platform::mouse_click(button);
+            invalidate_cache();
+            result
         }
         _ => Err(format!("Unknown mouse subcommand: {}", subcmd)),
     }
@@ -424,12 +464,16 @@ fn cmd_key(args: &[String]) -> Result<String, String> {
         "type" => {
             let text = remaining.get(0)
                 .ok_or("Usage: gui-tool key type <text>")?;
-            platform::key_type(text)
+            let result = platform::key_type(text);
+            invalidate_cache();
+            result
         }
         "press" => {
             let combo = remaining.get(0)
                 .ok_or("Usage: gui-tool key press <combo>")?;
-            platform::key_press(combo)
+            let result = platform::key_press(combo);
+            invalidate_cache();
+            result
         }
         _ => Err(format!("Unknown key subcommand: {}", subcmd)),
     }
