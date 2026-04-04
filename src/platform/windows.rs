@@ -143,7 +143,7 @@ fn extract_json_string<'a>(json: &'a str, key: &str) -> Option<&'a str> {
     Some(&after_colon[start..end])
 }
 
-fn extract_json_number(json: &str, key: &str) -> Option<u32> {
+pub(super) fn extract_json_number(json: &str, key: &str) -> Option<u32> {
     let pattern = format!("\"{}\"", key);
     let idx = json.find(&pattern)?;
     let after_key = &json[idx + pattern.len()..];

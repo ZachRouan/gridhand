@@ -1,5 +1,6 @@
 mod uinput;
 mod dbus;
+mod png;
 mod screenshot;
 mod windows;
 

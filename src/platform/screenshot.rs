@@ -26,6 +26,7 @@ pub fn screenshot_window(title: &str, output: &str) -> Result<String, String> {
     let (win_id, win_json) = windows::find_window_by_title(&mut conn, title)?
         .ok_or_else(|| format!("No window found matching '{}'", title))?;
 
+    // Activate the window
     let mut body = MarshalBuffer::new();
     body.write_u32(win_id);
     conn.call_method(
@@ -39,14 +40,35 @@ pub fn screenshot_window(title: &str, output: &str) -> Result<String, String> {
 
     std::thread::sleep(std::time::Duration::from_millis(300));
 
+    // Get window details (x, y, width, height) for cropping
+    let details_json = windows::get_window_details(&mut conn, win_id)?;
+    let win_x = windows::extract_json_number(&details_json, "x")
+        .ok_or_else(|| "Window details missing 'x' field".to_string())?;
+    let win_y = windows::extract_json_number(&details_json, "y")
+        .ok_or_else(|| "Window details missing 'y' field".to_string())?;
+    let win_w = windows::extract_json_number(&details_json, "width")
+        .ok_or_else(|| "Window details missing 'width' field".to_string())?;
+    let win_h = windows::extract_json_number(&details_json, "height")
+        .ok_or_else(|| "Window details missing 'height' field".to_string())?;
+
+    // Take full-screen screenshot
     let uri = take_portal_screenshot(&mut conn)?;
     let src_path = uri_to_path(&uri)?;
-    std::fs::copy(&src_path, output)
-        .map_err(|e| format!("Failed to copy screenshot to {}: {}", output, e))?;
+
+    // Read, crop, and write the PNG
+    let full_img = super::png::read_png(&src_path)?;
+    let cropped = super::png::crop(&full_img, win_x, win_y, win_w, win_h)?;
+    super::png::write_png(output, &cropped)?;
 
     Ok(json::success_with(vec![
         ("path", JsonValue::Str(output)),
         ("window", JsonValue::RawJson(win_json)),
+        ("bounds", JsonValue::Object(vec![
+            ("x", JsonValue::Int(win_x as i64)),
+            ("y", JsonValue::Int(win_y as i64)),
+            ("width", JsonValue::Int(win_w as i64)),
+            ("height", JsonValue::Int(win_h as i64)),
+        ])),
     ]))
 }
 
