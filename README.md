@@ -9,7 +9,7 @@ AI agents need to see and interact with the desktop. Existing tools either shell
 ## Install
 
 ```bash
-git clone https://github.com/USERNAME/gui-tool
+git clone https://github.com/zachr-ux/gui-tool
 cd gui-tool
 ./setup.sh
 ```
