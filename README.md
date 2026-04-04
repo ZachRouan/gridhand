@@ -10,21 +10,46 @@ It's also designed as a drop-in tool for AI coding agents (Codex, Gemini CLI, et
 
 ## Install
 
+Requires the [Rust toolchain](https://rustup.rs/).
+
 ```bash
 git clone https://github.com/zachr-ux/gui-tool
 cd gui-tool
 ./setup.sh
 ```
 
-The setup script:
-- Creates a udev rule for `/dev/uinput` access
-- Adds your user to the `input` group (requires logout/login)
-- Installs and enables the [window-calls](https://github.com/ickyicky/window-calls) GNOME extension
-- Builds the release binary
+The setup script detects your OS, handles platform-specific setup, and builds the release binary.
 
-Or build manually:
+### Linux
+
+The setup script will:
+- Create a udev rule for `/dev/uinput` access (requires sudo)
+- Add your user to the `input` group (requires logout/login)
+- Install and enable the [window-calls](https://github.com/ickyicky/window-calls) GNOME extension
+- Build the release binary
+
+### macOS
+
+The setup script builds the binary. You must then grant permissions manually:
+1. **System Settings > Privacy & Security > Accessibility** — add the `gui-tool` binary (required for mouse/keyboard)
+2. **System Settings > Privacy & Security > Screen Recording** — add the `gui-tool` binary (required for screenshots)
+
+### Windows
+
+The setup script just builds the binary. No special permissions or setup needed. Run from Git Bash, MSYS2, or any bash-compatible shell. Or build manually:
+
 ```bash
 cargo build --release
+```
+
+### Add to PATH (optional)
+
+```bash
+# Linux/macOS
+sudo ln -s $(pwd)/target/release/gui-tool /usr/local/bin/gui-tool
+
+# Windows (PowerShell, run as admin)
+Copy-Item target\release\gui-tool.exe C:\Windows\System32\
 ```
 
 ## Usage
