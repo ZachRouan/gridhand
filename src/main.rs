@@ -85,15 +85,11 @@ fn extract_window_flags(args: &[String]) -> Result<(Vec<String>, Option<(u64, i3
 
 /// Auto-select grid density based on image dimensions.
 /// Larger images get denser grids; smaller (zoomed) images get coarser grids.
+/// Grid cells target ~40px minimum to keep labels readable while maximizing precision.
 fn auto_grid(width: u32, height: u32) -> (u32, u32) {
-    let min_dim = width.min(height);
-    if min_dim >= 800 {
-        (8, 6)
-    } else if min_dim >= 400 {
-        (4, 3)
-    } else {
-        (3, 2)
-    }
+    let max_cols = (width / 40).max(2).min(8);
+    let max_rows = (height / 40).max(2).min(6);
+    (max_cols, max_rows)
 }
 
 /// Parse a grid density string like "8x6" into (cols, rows).
@@ -509,9 +505,14 @@ mod tests {
 
     #[test]
     fn test_auto_grid() {
+        // Full window: 1280/40=32 clamped to 8, 800/40=20 clamped to 6
         assert_eq!(auto_grid(1280, 800), (8, 6));
-        assert_eq!(auto_grid(320, 267), (3, 2));  // zoomed cell
-        assert_eq!(auto_grid(640, 400), (4, 3));   // medium
+        // Zoomed cell: 160/40=4, 133/40=3
+        assert_eq!(auto_grid(160, 133), (4, 3));
+        // Medium: 640/40=16 clamped to 8, 400/40=10 clamped to 6
+        assert_eq!(auto_grid(640, 400), (8, 6));
+        // Small: 80/40=2, 80/40=2
+        assert_eq!(auto_grid(80, 80), (2, 2));
     }
 
     #[test]
