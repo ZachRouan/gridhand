@@ -20,36 +20,18 @@ Also works as a standalone CLI tool for shell scripts and automation.
 
 ## Agent Integration
 
-gui-tool ships as a **Claude Code plugin** with a built-in skill definition. It also follows the [open Agent Skills standard](https://agents.md/) and works with Codex, Gemini CLI, and other compatible agents.
+A skill definition following the [Agent Skills](https://agentskills.io) standard is included. It works with Claude Code, Codex, Gemini CLI, and other compatible agents.
 
-### Claude Code (plugin install)
-
-```bash
-# 1. Clone and build
-git clone https://github.com/zachr-ux/agent-desktop-interface
-cd agent-desktop-interface
-./setup.sh
-
-# 2. Copy the plugin to your Claude Code skills directory
-cp -r . ~/.claude/skills/gui-tool
-
-# 3. Restart Claude Code — the plugin is auto-discovered
-```
-
-The plugin manifest (`.claude-plugin/plugin.json`) and skill definition (`skills/gui-tool/SKILL.md`) are included in the repo. Once copied, the skill appears in `/skills` as `gui-tool:gui-tool`.
-
-### Other agents (Codex, Gemini CLI, etc.)
-
-**1. Add gui-tool to your PATH:**
+**1. Add gui-tool to your PATH** (after building):
 ```bash
 # Linux/macOS
 sudo ln -s $(pwd)/target/release/gui-tool /usr/local/bin/gui-tool
 
-# Or use ~/.local/bin (no sudo)
+# Or without sudo
 ln -s $(pwd)/target/release/gui-tool ~/.local/bin/gui-tool
 ```
 
-**2. Install the skill** (for Claude Code, Codex, Gemini CLI, or any agent supporting the [Agent Skills](https://agentskills.io) standard):
+**2. Install the skill:**
 ```bash
 # Claude Code
 mkdir -p ~/.claude/skills/gui-tool
@@ -60,7 +42,7 @@ mkdir -p ~/.codex/skills/gui-tool
 cp skills/gui-tool/SKILL.md ~/.codex/skills/gui-tool/SKILL.md
 ```
 
-The agent will automatically discover gui-tool and use it when it needs to interact with the desktop. You can also reference it in your project's `AGENTS.md` or `GEMINI.md`.
+The agent will automatically discover gui-tool and use it when it needs to interact with the desktop.
 
 ### Examples
 
@@ -96,8 +78,6 @@ cd agent-desktop-interface
 ```
 
 The setup script detects your OS, handles platform-specific setup, and builds the release binary.
-
-To use as a Claude Code plugin, copy the repo to `~/.claude/skills/gui-tool` after building (see [Agent Integration](#agent-integration) above).
 
 ### Linux
 
