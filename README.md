@@ -1,10 +1,10 @@
 # gui-tool
 
-A zero-dependency Rust CLI for GUI interaction on Linux. Screenshots, window management, mouse control, keyboard input. Use it from the terminal, shell scripts, or as a tool for AI coding agents. JSON-in/JSON-out, single binary, no runtime dependencies beyond the OS.
+A zero-dependency Rust CLI for GUI interaction on Linux and macOS. Screenshots, window management, mouse control, keyboard input. Use it from the terminal, shell scripts, or as a tool for AI coding agents. JSON-in/JSON-out, single binary, no runtime dependencies beyond the OS.
 
 ## Why
 
-GUI automation on Linux is fragmented — tools shell out to `xdotool` (X11 only), require heavy dependencies, or don't work on Wayland. gui-tool does everything through raw kernel interfaces and D-Bus wire protocol. No crates, no subprocess calls, no libc. One binary, works everywhere GNOME/Wayland runs.
+GUI automation is fragmented — tools shell out to `xdotool` (X11 only) or `osascript`, require heavy dependencies, or don't work on Wayland. gui-tool does everything through raw kernel interfaces and native FFI. No crates, no subprocess calls. One binary per platform.
 
 It's also designed as a drop-in tool for AI coding agents (Codex, Gemini CLI, etc.) that need to see and interact with the desktop. The JSON output is easy to parse, and a [skill definition](#ai-agent-integration) is included so agents can discover and use it automatically.
 
@@ -92,17 +92,25 @@ Everything is implemented from scratch using only Rust's standard library:
 - **Mouse/Keyboard**: Writes `input_event` structs to `/dev/uinput` via `ioctl` syscalls (inline assembly, syscall 16 on x86_64)
 - **D-Bus**: Full wire protocol implementation over Unix domain sockets — SASL EXTERNAL auth, message framing, type marshalling, method calls, signal reception
 - **Screenshots**: XDG Desktop Portal via raw D-Bus — predicts request handle, subscribes to Response signal, waits for URI
-- **Windows**: Calls the [window-calls](https://github.com/ickyicky/window-calls) GNOME Shell extension over D-Bus
+- **Windows (Linux)**: Calls the [window-calls](https://github.com/ickyicky/window-calls) GNOME Shell extension over D-Bus
+- **Input (macOS)**: CoreGraphics event injection (`CGEventCreateMouseEvent`, `CGEventCreateKeyboardEvent`)
+- **Screenshots (macOS)**: `CGWindowListCreateImage` with native window cropping
+- **Windows (macOS)**: `CGWindowListCopyWindowInfo` + Objective-C runtime for window activation
 
-Zero crates. Zero `extern "C"`. Zero subprocess calls. ~1,700 lines of Rust.
+Zero crates. Zero subprocess calls. ~2,500 lines of Rust.
 
 ## Requirements
 
-- Linux with GNOME on Wayland
-- Rust toolchain (for building)
+### Linux
+- GNOME on Wayland
 - User in `input` group + udev rule (for mouse/keyboard)
 - window-calls GNOME extension (for window management)
 - XDG Desktop Portal (for screenshots — included in GNOME by default)
+
+### macOS
+- macOS 10.15+
+- Accessibility permission (System Settings > Privacy & Security > Accessibility) — required for mouse/keyboard input
+- Screen Recording permission (System Settings > Privacy & Security > Screen Recording) — required for screenshots
 
 ## AI Agent Integration
 
