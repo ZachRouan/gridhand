@@ -1,4 +1,4 @@
-ZachRouan# Agent Desktop Interface (`gui-tool`)
+Agent Desktop Interface (`gui-tool`)
 
 `Linux` `macOS` `Windows` `Zero Dependencies` `MCP Ready`
 
