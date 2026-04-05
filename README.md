@@ -2,7 +2,7 @@
 
 `Linux` `macOS` `Windows` `Zero Dependencies`
 
-A lightweight, zero-dependency binary that gives AI coding agents reliable native control over local desktops. Screenshots, window management, mouse control, keyboard input — all through raw OS APIs with strict JSON output.
+Lightweight single-binary Rust CLI using only the standard library + direct OS APIs for minimal attack surface and maximum reliability as an AI desktop agent backend.
 
 Also works as a standalone CLI tool for shell scripts and automation.
 
