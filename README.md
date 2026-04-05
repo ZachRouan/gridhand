@@ -124,7 +124,7 @@ gui-tool key press "ctrl+a" --window-id 2045481940
 Requires the [Rust toolchain](https://rustup.rs/).
 
 ```bash
-git clone https://github.com/zachr-ux/agent-desktop-interface
+git clone https://github.com/ZachRouan/agent-desktop-interface
 cd agent-desktop-interface
 ./setup.sh
 ```
