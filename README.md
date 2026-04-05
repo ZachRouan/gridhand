@@ -1,49 +1,21 @@
-Agent Desktop Interface (`gui-tool`)
+# Agent Desktop Interface (`gui-tool`)
 
-`Linux` `macOS` `Windows` `Zero Dependencies` `MCP Ready`
+`Linux` `macOS` `Windows` `Zero Dependencies`
 
-A lightweight, single-binary Rust CLI engineered to serve as the highly deterministic "hands and eyes" (Layer 3 Actuator) for AI desktop agents. 
+Cross-platform Rust CLI for GUI automation — screenshots, window management, mouse/keyboard control, and strict JSON output. No dependencies, single binary, uses direct OS APIs.
 
-By utilizing pure standard library Rust and direct OS APIs, `gui-tool` bypasses the severe dependencies, latency, and fragility of traditional Python automation frameworks (like `pyautogui` or `xdotool`). It is built specifically to bridge the spatial reasoning gap of Vision-Language Models (VLMs) via **recursive visual grids**.
+Built for AI desktop agents (Claude Code, Codex, Gemini CLI, etc.) but works fine as a general-purpose GUI automation tool.
 
-## Why Agents Need This
+## Features
 
-The paradigm of AI automation relies heavily on visual grounding, but foundational models struggle with zero-shot pixel math. `gui-tool` solves the Agent-Computer Interface (ACI) bottleneck:
+- **Grid overlay for targeting:** Instead of guessing pixel coordinates, overlay a labeled grid (A1, B2, etc.) on screenshots and click by cell label. Supports recursive zoom for sub-regions (`B2.C1`).
+- **No dependencies:** Pure std Rust, direct FFI to OS APIs (CoreGraphics, user32.dll, D-Bus). Compiles to a single small binary.
+- **Wayland support:** Works natively on GNOME/Wayland via XDG Desktop Portals and the `window-calls` extension, where tools like `xdotool` and `pyautogui` break.
+- **JSON output:** Every command returns structured JSON, so agents don’t have to parse text output.
 
-* **Recursive Grid Targeting:** VLMs are notoriously bad at guessing raw X/Y pixel coordinates. `gui-tool` superimposes an alphanumeric grid over screenshots. If an element is too small, the agent can request a localized sub-grid (e.g., `--cell B2.C1`), granting the LLM infinite pixel precision via simple text-token matching.
-* **Zero Python Bloat & Native FFI:** No virtual environments and no Docker sandboxes required. It uses direct syscalls and OS framework calls (CoreGraphics, user32.dll, raw D-Bus). The entire tool compiles to a single minimal binary.
-* **Wayland & Cross-Platform Native:** Works natively on modern Linux Wayland compositors (via XDG Portals and GNOME extensions) where legacy X11 tools fail, alongside perfect native support for Windows and macOS.
-* **Deterministic JSON (MCP Ready):** Every command returns structured JSON. No HTML to parse, no OCR to fail, no unstructured terminal stdout to hallucinate over. It operates as the mathematically perfect primitive for Model Context Protocol (MCP) servers and Agent Skills.
+## Grid Targeting
 
-## Agent Integration
-
-A skill definition following the [Agent Skills](https://agentskills.io) standard is included in `skills/gui-tool/SKILL.md`. It works natively with Claude Code, Codex, Gemini CLI, and other compatible agents.
-
-**1. Add gui-tool to your PATH** (after building):
-```bash
-# Linux/macOS
-sudo ln -s $(pwd)/target/release/gui-tool /usr/local/bin/gui-tool
-
-# Or without sudo
-ln -s $(pwd)/target/release/gui-tool ~/.local/bin/gui-tool
-```
-
-**2. Install the skill:**
-```bash
-# Claude Code
-mkdir -p ~/.claude/skills/gui-tool
-cp skills/gui-tool/SKILL.md ~/.claude/skills/gui-tool/SKILL.md
-
-# Codex
-mkdir -p ~/.codex/skills/gui-tool
-cp skills/gui-tool/SKILL.md ~/.codex/skills/gui-tool/SKILL.md
-```
-
-The agent will automatically discover `gui-tool` and use it to interact directly with the host desktop.
-
-## Precision Targeting (The VLM Superpower)
-
-Agents read cell labels from grid images instead of computing pixel coordinates. One or two zoom levels provide button-level precision on any resolution, drastically reducing prompt token sizes and eliminating spatial hallucination.
+The main idea: agents are bad at guessing pixel coordinates from screenshots. Instead, `gui-tool` overlays a labeled grid, and the agent references cells by label. If a cell is too coarse, zoom into it and get a finer sub-grid.
 
 ```bash
 # Screenshot with labeled grid overlay (default auto-scales, e.g., 8x6)
@@ -52,20 +24,21 @@ gui-tool screenshot --window-id 123 --grid --output /tmp/grid.png
 # Custom grid density
 gui-tool screenshot --window-id 123 --grid 6x4 --output /tmp/grid.png
 
-# Zoom into a cell with sub-grid (Recursive Zoom)
+# Zoom into a cell with sub-grid
 gui-tool screenshot --window-id 123 --grid --cell B2 --output /tmp/zoom.png
 
-# Click a cell (automatically calculates the exact center of that cell)
+# Move to a cell (calculates center automatically)
 gui-tool mouse move --cell B2 --window-id 123
 
-# Recursive: click cell C1 strictly within the boundaries of parent cell B2
+# Recursive: target cell C1 within cell B2
 gui-tool mouse move --cell B2.C1 --window-id 123
 gui-tool mouse click --window-id 123
 ```
 
-## Standard Commands
+## Commands
 
 ### Screenshots
+
 ```bash
 # Full screen
 gui-tool screenshot --output /tmp/screen.png
@@ -78,6 +51,7 @@ gui-tool screenshot --window-id 2045481940 --output /tmp/app.png
 ```
 
 ### Window Management
+
 ```bash
 # List all windows (returns JSON array of IDs, titles, PIDs, and bounds)
 gui-tool windows list
@@ -86,7 +60,8 @@ gui-tool windows list
 gui-tool windows raise 1234567890
 ```
 
-### Mouse Automation
+### Mouse
+
 ```bash
 # Move to absolute screen coordinates
 gui-tool mouse move 500 300
@@ -98,12 +73,14 @@ gui-tool mouse move 100 200 --window-id 2045481940
 gui-tool mouse click
 gui-tool mouse click --button right
 
-# Focus a window first, then click (single process, no focus race)
+# Focus a window first, then click
 gui-tool mouse click --window "Firefox"
 ```
-*Note: When `--window` or `--window-id` is used with `mouse move`, coordinates are relative to the window — pixel positions from a cropped screenshot map directly to mouse coordinates.*
 
-### Keyboard Automation
+*When `--window` or `--window-id` is used with `mouse move`, coordinates are relative to the window — pixel positions from a cropped screenshot map directly to mouse coordinates.*
+
+### Keyboard
+
 ```bash
 # Type text into focused window
 gui-tool key type "hello world"
@@ -119,7 +96,33 @@ gui-tool key type "hello" --window "Terminal"
 gui-tool key press "ctrl+a" --window-id 2045481940
 ```
 
-## Installation & Setup
+## Agent Integration
+
+A skill definition following the [Agent Skills](https://agentskills.io) standard is included in `skills/gui-tool/SKILL.md`.
+
+**1. Add gui-tool to your PATH** (after building):
+
+```bash
+# Linux/macOS
+sudo ln -s $(pwd)/target/release/gui-tool /usr/local/bin/gui-tool
+
+# Or without sudo
+ln -s $(pwd)/target/release/gui-tool ~/.local/bin/gui-tool
+```
+
+**2. Install the skill:**
+
+```bash
+# Claude Code
+mkdir -p ~/.claude/skills/gui-tool
+cp skills/gui-tool/SKILL.md ~/.claude/skills/gui-tool/SKILL.md
+
+# Codex
+mkdir -p ~/.codex/skills/gui-tool
+cp skills/gui-tool/SKILL.md ~/.codex/skills/gui-tool/SKILL.md
+```
+
+## Installation
 
 Requires the [Rust toolchain](https://rustup.rs/).
 
@@ -128,23 +131,24 @@ git clone https://github.com/ZachRouan/agent-desktop-interface
 cd agent-desktop-interface
 ./setup.sh
 ```
-The setup script detects your OS, handles platform-specific configurations, and builds the release binary.
 
-### OS-Specific Requirements
+The setup script detects your OS, handles platform-specific setup, and builds the release binary.
 
-| Platform | Version | Setup Required |
-|----------|---------|-------|
-| **Linux** | GNOME/Wayland | `input` group + udev rule + [window-calls](https://github.com/ickyicky/window-calls) extension (Handled by `setup.sh`) |
-| **macOS** | 10.15+ | **Accessibility** + **Screen Recording** permissions must be granted manually in System Settings. |
-| **Windows** | 8+ | None. (Can be built manually via `cargo build --release` in MSYS2, Git Bash, or PowerShell) |
+### Platform Requirements
 
-## Architecture: How It Works
+|Platform   |Version      |Setup                                                                                                                 |
+|-----------|-------------|----------------------------------------------------------------------------------------------------------------------|
+|**Linux**  |GNOME/Wayland|`input` group + udev rule + [window-calls](https://github.com/ickyicky/window-calls) extension (handled by `setup.sh`)|
+|**macOS**  |10.15+       |Grant **Accessibility** + **Screen Recording** permissions in System Settings                                         |
+|**Windows**|8+           |None (`cargo build --release` in MSYS2, Git Bash, or PowerShell)                                                      |
 
-`gui-tool` achieves its tiny ~3,500 line footprint by strictly utilizing Rust's standard library to interface with raw OS mechanisms:
+## Architecture
 
-* **Linux:** Uses `/dev/uinput` kernel interface via inline assembly ioctl syscalls for input. Implements the full D-Bus wire protocol from scratch (SASL auth, message framing, type marshalling) to interface with XDG Desktop Portals for screenshots and GNOME `window-calls` for Wayland window management.
-* **macOS:** Utilizes `CGEventCreateMouseEvent` / `CGEventCreateKeyboardEvent` via CoreGraphics FFI for input. Uses `CGWindowListCreateImage` for native window cropped screenshots and Objective-C runtime bindings for window activation.
-* **Windows:** Directly binds to `user32.dll` (`SendInput`, `EnumWindows`, `SetForegroundWindow`, `VkKeyScanW`) and `gdi32.dll` (`BitBlt`, `GetDIBits`) for unmediated, low-latency execution.
+~3,500 lines of Rust, no external crates. Each platform uses direct OS APIs:
+
+- **Linux:** `/dev/uinput` for input via ioctl syscalls. Full D-Bus wire protocol implementation (SASL auth, message framing, type marshalling) for XDG Desktop Portal screenshots and GNOME `window-calls` window management.
+- **macOS:** CoreGraphics FFI (`CGEventCreateMouseEvent`, `CGEventCreateKeyboardEvent`) for input. `CGWindowListCreateImage` for screenshots. Objective-C runtime bindings for window activation.
+- **Windows:** `user32.dll` (`SendInput`, `EnumWindows`, `SetForegroundWindow`, `VkKeyScanW`) and `gdi32.dll` (`BitBlt`, `GetDIBits`) for input, window management, and screenshots.
 
 ## License
 
