@@ -19,7 +19,7 @@ pub fn read_png(path: &str) -> Result<Image, String> {
     decode_png(&data)
 }
 
-/// Write an Image as a PNG file using stored (uncompressed) IDAT blocks.
+/// Write an Image as a PNG file with deflate-compressed IDAT blocks.
 pub fn write_png(path: &str, img: &Image) -> Result<(), String> {
     let data = encode_png(img)?;
     std::fs::write(path, &data).map_err(|e| format!("Failed to write {}: {}", path, e))
@@ -578,18 +578,23 @@ fn encode_png(img: &Image) -> Result<Vec<u8>, String> {
     ihdr.push(0); // interlace
     write_chunk(&mut out, b"IHDR", &ihdr);
 
-    // Build raw filtered data (filter type 0 = None for each row)
+    // Build raw filtered data (filter type 1 = Sub for each row)
     let stride = img.width as usize * img.bpp as usize;
+    let bpp = img.bpp as usize;
     let raw_len = img.height as usize * (1 + stride);
     let mut raw = Vec::with_capacity(raw_len);
     for y in 0..img.height as usize {
-        raw.push(0); // filter byte: None
+        raw.push(1); // filter byte: Sub
         let row_start = y * stride;
-        raw.extend_from_slice(&img.pixels[row_start..row_start + stride]);
+        for i in 0..stride {
+            let cur = img.pixels[row_start + i];
+            let left = if i >= bpp { img.pixels[row_start + i - bpp] } else { 0 };
+            raw.push(cur.wrapping_sub(left));
+        }
     }
 
-    // Wrap in zlib with stored deflate blocks
-    let idat_data = zlib_stored(&raw);
+    // Compress with deflate
+    let idat_data = zlib_compress(&raw);
     write_chunk(&mut out, b"IDAT", &idat_data);
 
     // IEND
@@ -606,23 +611,248 @@ fn write_chunk(out: &mut Vec<u8>, chunk_type: &[u8; 4], data: &[u8]) {
     out.extend_from_slice(&crc.to_be_bytes());
 }
 
-/// Produce a zlib stream using stored (no compression) deflate blocks.
-fn zlib_stored(data: &[u8]) -> Vec<u8> {
+// ---------------------------------------------------------------------------
+// Deflate compression (RFC 1951) — LZ77 with fixed Huffman codes
+// ---------------------------------------------------------------------------
+
+struct BitWriter {
+    buf: Vec<u8>,
+    bit_buf: u32,
+    bits_in: u8,
+}
+
+impl BitWriter {
+    fn new() -> Self {
+        BitWriter { buf: Vec::new(), bit_buf: 0, bits_in: 0 }
+    }
+
+    fn write_bits(&mut self, value: u32, n: u8) {
+        self.bit_buf |= value << self.bits_in;
+        self.bits_in += n;
+        while self.bits_in >= 8 {
+            self.buf.push(self.bit_buf as u8);
+            self.bit_buf >>= 8;
+            self.bits_in -= 8;
+        }
+    }
+
+    fn flush(&mut self) {
+        if self.bits_in > 0 {
+            self.buf.push(self.bit_buf as u8);
+            self.bit_buf = 0;
+            self.bits_in = 0;
+        }
+    }
+}
+
+/// Returns (reversed_code, bit_length) for the fixed Huffman literal/length table.
+fn fixed_lit_code(val: u16) -> (u32, u8) {
+    match val {
+        0..=143 => (reverse_bits(0x30 + val as u32, 8), 8),
+        144..=255 => (reverse_bits(0x190 + (val - 144) as u32, 9), 9),
+        256..=279 => (reverse_bits((val - 256) as u32, 7), 7),
+        280..=287 => (reverse_bits(0xC0 + (val - 280) as u32, 8), 8),
+        _ => unreachable!(),
+    }
+}
+
+/// Encode match length (3..=258) as (length_code, extra_bits, extra_value).
+fn encode_length(len: usize) -> (u16, u8, u16) {
+    match len {
+        3 => (257, 0, 0),    4 => (258, 0, 0),
+        5 => (259, 0, 0),    6 => (260, 0, 0),
+        7 => (261, 0, 0),    8 => (262, 0, 0),
+        9 => (263, 0, 0),    10 => (264, 0, 0),
+        11..=12 => (265, 1, (len - 11) as u16),
+        13..=14 => (266, 1, (len - 13) as u16),
+        15..=16 => (267, 1, (len - 15) as u16),
+        17..=18 => (268, 1, (len - 17) as u16),
+        19..=22 => (269, 2, (len - 19) as u16),
+        23..=26 => (270, 2, (len - 23) as u16),
+        27..=30 => (271, 2, (len - 27) as u16),
+        31..=34 => (272, 2, (len - 31) as u16),
+        35..=42 => (273, 3, (len - 35) as u16),
+        43..=50 => (274, 3, (len - 43) as u16),
+        51..=58 => (275, 3, (len - 51) as u16),
+        59..=66 => (276, 3, (len - 59) as u16),
+        67..=82 => (277, 4, (len - 67) as u16),
+        83..=98 => (278, 4, (len - 83) as u16),
+        99..=114 => (279, 4, (len - 99) as u16),
+        115..=130 => (280, 4, (len - 115) as u16),
+        131..=162 => (281, 5, (len - 131) as u16),
+        163..=194 => (282, 5, (len - 163) as u16),
+        195..=226 => (283, 5, (len - 195) as u16),
+        227..=257 => (284, 5, (len - 227) as u16),
+        258 => (285, 0, 0),
+        _ => unreachable!(),
+    }
+}
+
+/// Encode distance (1..=32768) as (distance_code, extra_bits, extra_value).
+fn encode_distance(dist: usize) -> (u8, u8, u16) {
+    match dist {
+        1 => (0, 0, 0),      2 => (1, 0, 0),
+        3 => (2, 0, 0),      4 => (3, 0, 0),
+        5..=6 => (4, 1, (dist - 5) as u16),
+        7..=8 => (5, 1, (dist - 7) as u16),
+        9..=12 => (6, 2, (dist - 9) as u16),
+        13..=16 => (7, 2, (dist - 13) as u16),
+        17..=24 => (8, 3, (dist - 17) as u16),
+        25..=32 => (9, 3, (dist - 25) as u16),
+        33..=48 => (10, 4, (dist - 33) as u16),
+        49..=64 => (11, 4, (dist - 49) as u16),
+        65..=96 => (12, 5, (dist - 65) as u16),
+        97..=128 => (13, 5, (dist - 97) as u16),
+        129..=192 => (14, 6, (dist - 129) as u16),
+        193..=256 => (15, 6, (dist - 193) as u16),
+        257..=384 => (16, 7, (dist - 257) as u16),
+        385..=512 => (17, 7, (dist - 385) as u16),
+        513..=768 => (18, 8, (dist - 513) as u16),
+        769..=1024 => (19, 8, (dist - 769) as u16),
+        1025..=1536 => (20, 9, (dist - 1025) as u16),
+        1537..=2048 => (21, 9, (dist - 1537) as u16),
+        2049..=3072 => (22, 10, (dist - 2049) as u16),
+        3073..=4096 => (23, 10, (dist - 3073) as u16),
+        4097..=6144 => (24, 11, (dist - 4097) as u16),
+        6145..=8192 => (25, 11, (dist - 6145) as u16),
+        8193..=12288 => (26, 12, (dist - 8193) as u16),
+        12289..=16384 => (27, 12, (dist - 12289) as u16),
+        16385..=24576 => (28, 13, (dist - 16385) as u16),
+        24577..=32768 => (29, 13, (dist - 24577) as u16),
+        _ => unreachable!(),
+    }
+}
+
+const DEFLATE_WINDOW: usize = 32768;
+const DEFLATE_HASH_BITS: usize = 15;
+const DEFLATE_HASH_SIZE: usize = 1 << DEFLATE_HASH_BITS;
+const DEFLATE_HASH_MASK: usize = DEFLATE_HASH_SIZE - 1;
+const DEFLATE_MIN_MATCH: usize = 3;
+const DEFLATE_MAX_MATCH: usize = 258;
+const DEFLATE_MAX_CHAIN: usize = 64;
+
+fn deflate_hash(data: &[u8], pos: usize) -> usize {
+    let a = data[pos] as u32;
+    let b = data[pos + 1] as u32;
+    let c = data[pos + 2] as u32;
+    (a.wrapping_mul(1063).wrapping_add(b.wrapping_mul(31)).wrapping_add(c)) as usize & DEFLATE_HASH_MASK
+}
+
+fn deflate_compress(data: &[u8]) -> Vec<u8> {
+    let mut w = BitWriter::new();
+
+    // Single fixed Huffman block: BFINAL=1, BTYPE=01
+    w.write_bits(1, 1);
+    w.write_bits(1, 2);
+
+    if data.is_empty() {
+        let (code, bits) = fixed_lit_code(256);
+        w.write_bits(code, bits);
+        w.flush();
+        return w.buf;
+    }
+
+    let mut head = vec![0u32; DEFLATE_HASH_SIZE];
+    let mut prev = vec![0u32; DEFLATE_WINDOW];
+    let mut pos = 0;
+
+    while pos < data.len() {
+        if pos + 2 < data.len() {
+            let h = deflate_hash(data, pos);
+            let mut best_len = 0usize;
+            let mut best_dist = 0usize;
+
+            // Search hash chain for matches
+            let mut candidate = head[h];
+            let mut chain_count = 0u32;
+            while candidate > 0 && chain_count < DEFLATE_MAX_CHAIN as u32 {
+                let cpos = (candidate - 1) as usize;
+                if pos <= cpos || pos - cpos > DEFLATE_WINDOW {
+                    break;
+                }
+                let dist = pos - cpos;
+                let max_len = DEFLATE_MAX_MATCH.min(data.len() - pos);
+                let mut mlen = 0;
+                while mlen < max_len && data[cpos + mlen] == data[pos + mlen] {
+                    mlen += 1;
+                }
+                if mlen >= DEFLATE_MIN_MATCH && mlen > best_len {
+                    best_len = mlen;
+                    best_dist = dist;
+                    if mlen >= DEFLATE_MAX_MATCH { break; }
+                }
+                candidate = prev[cpos & (DEFLATE_WINDOW - 1)];
+                chain_count += 1;
+            }
+
+            // Update hash chain
+            prev[pos & (DEFLATE_WINDOW - 1)] = head[h];
+            head[h] = (pos + 1) as u32;
+
+            if best_len >= DEFLATE_MIN_MATCH {
+                let (len_code, len_ebits, len_eval) = encode_length(best_len);
+                let (code, bits) = fixed_lit_code(len_code);
+                w.write_bits(code, bits);
+                if len_ebits > 0 {
+                    w.write_bits(len_eval as u32, len_ebits);
+                }
+                let (dist_code, dist_ebits, dist_eval) = encode_distance(best_dist);
+                w.write_bits(reverse_bits(dist_code as u32, 5), 5);
+                if dist_ebits > 0 {
+                    w.write_bits(dist_eval as u32, dist_ebits);
+                }
+                // Insert skipped positions into hash
+                for i in 1..best_len {
+                    let npos = pos + i;
+                    if npos + 2 < data.len() {
+                        let h2 = deflate_hash(data, npos);
+                        prev[npos & (DEFLATE_WINDOW - 1)] = head[h2];
+                        head[h2] = (npos + 1) as u32;
+                    }
+                }
+                pos += best_len;
+            } else {
+                let (code, bits) = fixed_lit_code(data[pos] as u16);
+                w.write_bits(code, bits);
+                pos += 1;
+            }
+        } else {
+            let (code, bits) = fixed_lit_code(data[pos] as u16);
+            w.write_bits(code, bits);
+            pos += 1;
+        }
+    }
+
+    // End of block
+    let (code, bits) = fixed_lit_code(256);
+    w.write_bits(code, bits);
+    w.flush();
+    w.buf
+}
+
+fn zlib_compress(data: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
-    // Zlib header: CM=8 (deflate), CINFO=7 (32K window)
-    // CMF = 0x78, FLG = 0x01 (FCHECK so (CMF*256+FLG) % 31 == 0)
     out.push(0x78);
     out.push(0x01);
+    out.extend_from_slice(&deflate_compress(data));
+    let checksum = adler32(data);
+    out.extend_from_slice(&checksum.to_be_bytes());
+    out
+}
 
-    // Split into stored blocks of max 65535 bytes
+/// Zlib stored blocks — only used in tests to verify inflate handles stored blocks.
+#[cfg(test)]
+fn zlib_stored(data: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.push(0x78);
+    out.push(0x01);
     let max_block = 65535usize;
     let mut offset = 0;
     while offset < data.len() {
         let remaining = data.len() - offset;
         let block_len = remaining.min(max_block);
         let is_final = offset + block_len >= data.len();
-
-        out.push(if is_final { 0x01 } else { 0x00 }); // BFINAL + BTYPE=00
+        out.push(if is_final { 0x01 } else { 0x00 });
         let len = block_len as u16;
         let nlen = !len;
         out.push(len as u8);
@@ -632,20 +862,15 @@ fn zlib_stored(data: &[u8]) -> Vec<u8> {
         out.extend_from_slice(&data[offset..offset + block_len]);
         offset += block_len;
     }
-
-    // Handle empty data
     if data.is_empty() {
-        out.push(0x01); // BFINAL=1, BTYPE=00
+        out.push(0x01);
         out.push(0x00);
         out.push(0x00);
         out.push(0xFF);
         out.push(0xFF);
     }
-
-    // Adler-32 checksum
     let checksum = adler32(data);
     out.extend_from_slice(&checksum.to_be_bytes());
-
     out
 }
 
@@ -983,5 +1208,44 @@ mod tests {
         };
         draw_grid(&mut img, 4, 3);
         assert_eq!(img.pixels.len(), 160 * 120 * 4);
+    }
+
+    #[test]
+    fn test_deflate_compression_ratio() {
+        // Solid-color image should compress very well
+        let img = Image {
+            width: 100,
+            height: 100,
+            bpp: 4,
+            pixels: vec![128u8; 100 * 100 * 4],
+        };
+        let encoded = encode_png(&img).unwrap();
+        let raw_size = 100 * 100 * 4;
+        // Compressed should be much smaller than raw pixel data
+        assert!(encoded.len() < raw_size / 2,
+            "compressed {} should be < half of raw {}", encoded.len(), raw_size);
+        // Verify roundtrip
+        let decoded = decode_png(&encoded).unwrap();
+        assert_eq!(decoded.pixels, img.pixels);
+    }
+
+    #[test]
+    fn test_deflate_roundtrip_varied() {
+        // Image with varied pixel data (gradient pattern)
+        let mut pixels = vec![0u8; 64 * 48 * 3];
+        for y in 0..48usize {
+            for x in 0..64usize {
+                let i = (y * 64 + x) * 3;
+                pixels[i] = (x * 4) as u8;
+                pixels[i + 1] = (y * 5) as u8;
+                pixels[i + 2] = ((x + y) * 2) as u8;
+            }
+        }
+        let img = Image { width: 64, height: 48, bpp: 3, pixels };
+        let encoded = encode_png(&img).unwrap();
+        let decoded = decode_png(&encoded).unwrap();
+        assert_eq!(decoded.width, 64);
+        assert_eq!(decoded.height, 48);
+        assert_eq!(decoded.pixels, img.pixels);
     }
 }
