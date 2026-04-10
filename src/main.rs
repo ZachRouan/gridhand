@@ -482,4 +482,63 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[test]
+    fn test_unknown_flag_error() {
+        let result = cmd_screenshot(&["--bogus".to_string()]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unknown flag"));
+    }
+
+    #[test]
+    fn test_screenshot_path_traversal_blocked() {
+        let result = cmd_screenshot(&["--output".to_string(), "/tmp/../etc/bad.png".to_string()]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("path traversal"));
+    }
+
+    #[test]
+    fn test_screenshot_bad_extension_blocked() {
+        let result = cmd_screenshot(&["--output".to_string(), "/tmp/test.jpg".to_string()]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains(".png"));
+    }
+
+    #[test]
+    fn test_json_output_has_status() {
+        let success = json::success();
+        assert!(success.contains("\"status\":\"success\""));
+        let err = json::error("test");
+        assert!(err.contains("\"status\":\"error\""));
+        assert!(err.contains("\"message\":\"test\""));
+    }
+
+    #[test]
+    fn test_windows_unknown_subcommand() {
+        let result = cmd_windows(&["bogus".to_string()]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_key_unknown_subcommand() {
+        let result = cmd_key(&["bogus".to_string()]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_mouse_no_args() {
+        let result = cmd_mouse(&[]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_key_no_args() {
+        let result = cmd_key(&[]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_windows_no_args() {
+        let result = cmd_windows(&[]);
+        assert!(result.is_err());
+    }
 }
