@@ -6,13 +6,26 @@ mod platform;
 const ZOOM_MIN_WIDTH: u32 = 640;
 const ZOOM_MIN_HEIGHT: u32 = 480;
 
-/// Cache file for screenshots — reused when zooming with --cell
-/// to avoid taking redundant screenshots of an unchanged window.
-const SCREENSHOT_CACHE: &str = "/tmp/gui-tool-screenshot-cache.png";
-
 /// Maximum age of cache in seconds before a fresh screenshot is taken.
 /// Generous timeout — cache is also invalidated by mouse/key actions.
 const CACHE_MAX_AGE_SECS: u64 = 60;
+
+/// Returns a per-user cache path for screenshots.
+/// Uses XDG_RUNTIME_DIR (per-user, mode 0700, tmpfs) when available,
+/// falls back to ~/.cache/gui-tool/, then to the system temp dir.
+fn cache_path() -> String {
+    if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
+        return format!("{}/gui-tool-screenshot-cache.png", dir);
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        let dir = format!("{}/.cache/gui-tool", home);
+        let _ = std::fs::create_dir_all(&dir);
+        return format!("{}/screenshot-cache.png", dir);
+    }
+    // macOS/Windows: temp_dir is already per-user
+    let tmp = std::env::temp_dir();
+    format!("{}/gui-tool-screenshot-cache.png", tmp.display())
+}
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -98,12 +111,12 @@ fn extract_window_flags(args: &[String]) -> Result<(Vec<String>, Option<(u64, i3
 
 /// Invalidate the screenshot cache (called after actions that change screen state).
 fn invalidate_cache() {
-    let _ = std::fs::remove_file(SCREENSHOT_CACHE);
+    let _ = std::fs::remove_file(cache_path());
 }
 
 /// Check if the screenshot cache file exists and is recent enough to reuse.
 fn cache_is_fresh() -> bool {
-    if let Ok(meta) = std::fs::metadata(SCREENSHOT_CACHE) {
+    if let Ok(meta) = std::fs::metadata(&cache_path()) {
         if let Ok(modified) = meta.modified() {
             if let Ok(elapsed) = modified.elapsed() {
                 return elapsed.as_secs() < CACHE_MAX_AGE_SECS;
@@ -280,22 +293,22 @@ fn cmd_screenshot(args: &[String]) -> Result<String, String> {
         json::success_with(vec![("path", json::JsonValue::Str(output))])
     } else if let Some(title) = &window_title {
         let r = platform::screenshot_window(title, output)?;
-        let _ = std::fs::copy(output, SCREENSHOT_CACHE);
+        let _ = std::fs::copy(output, &cache_path());
         r
     } else if let Some(id) = window_id {
         let r = platform::screenshot_window_by_id(id, output)?;
-        let _ = std::fs::copy(output, SCREENSHOT_CACHE);
+        let _ = std::fs::copy(output, &cache_path());
         r
     } else {
         let r = platform::screenshot_full(output)?;
-        let _ = std::fs::copy(output, SCREENSHOT_CACHE);
+        let _ = std::fs::copy(output, &cache_path());
         r
     };
 
     // Post-process: apply cell crop and/or grid overlay
     if cell.is_some() || grid_enabled {
         // Read from cache if available, otherwise from the output
-        let source = if use_cache { SCREENSHOT_CACHE } else { output };
+        let source = if use_cache { &cache_path() } else { output };
         let mut img = platform::png::read_png(source)?;
 
         // If --cell is specified, recursively crop through dot-separated refs
