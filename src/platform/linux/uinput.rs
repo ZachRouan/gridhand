@@ -150,9 +150,69 @@ const O_NONBLOCK: i32 = 0o4000;
 const UINPUT_DEV_SIZE: usize = 1116;
 const INPUT_EVENT_SIZE: usize = 24;
 
-// Screen resolution (used for absolute positioning)
-const SCREEN_WIDTH: i32 = 3840;
-const SCREEN_HEIGHT: i32 = 1080;
+/// Parse a DRM mode string like "1920x1080" into (width, height).
+fn parse_mode(s: &str) -> Option<(i32, i32)> {
+    let (w, h) = s.split_once('x')?;
+    Some((w.trim().parse().ok()?, h.trim().parse().ok()?))
+}
+
+/// Detect total screen dimensions by reading connected DRM outputs from sysfs.
+/// Falls back to framebuffer virtual_size, then to 1920x1080.
+fn detect_screen_size() -> (i32, i32) {
+    // Try DRM sysfs: /sys/class/drm/card*-*/status + modes
+    if let Ok(entries) = std::fs::read_dir("/sys/class/drm") {
+        let mut total_width: i32 = 0;
+        let mut max_height: i32 = 0;
+        let mut found = false;
+
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            // Output entries look like "card0-HDMI-A-1", "card0-DP-1", "card0-eDP-1"
+            // Skip bare "card0", "renderD128", etc.
+            if !name_str.starts_with("card") || !name_str.contains('-') {
+                continue;
+            }
+            let path = entry.path();
+            let Ok(status) = std::fs::read_to_string(path.join("status")) else {
+                continue;
+            };
+            if status.trim() != "connected" {
+                continue;
+            }
+            let Ok(modes) = std::fs::read_to_string(path.join("modes")) else {
+                continue;
+            };
+            let Some(first) = modes.lines().next() else {
+                continue;
+            };
+            let Some((w, h)) = parse_mode(first) else {
+                continue;
+            };
+            total_width += w;
+            if h > max_height {
+                max_height = h;
+            }
+            found = true;
+        }
+
+        if found {
+            return (total_width, max_height);
+        }
+    }
+
+    // Fallback: framebuffer virtual_size (format: "1920,1080")
+    if let Ok(vs) = std::fs::read_to_string("/sys/class/graphics/fb0/virtual_size") {
+        if let Some((w, h)) = vs.trim().split_once(',') {
+            if let (Ok(w), Ok(h)) = (w.parse::<i32>(), h.parse::<i32>()) {
+                return (w, h);
+            }
+        }
+    }
+
+    // Ultimate fallback
+    (1920, 1080)
+}
 
 struct UinputDevice {
     file: File,
@@ -205,11 +265,12 @@ impl UinputDevice {
             dev[80] = 0x06;
 
             if abs {
+                let (sw, sh) = detect_screen_size();
                 // absmax[ABS_X] at offset 92 (i32 little-endian)
-                let w = SCREEN_WIDTH.to_le_bytes();
+                let w = sw.to_le_bytes();
                 dev[92..96].copy_from_slice(&w);
                 // absmax[ABS_Y] at offset 96
-                let h = SCREEN_HEIGHT.to_le_bytes();
+                let h = sh.to_le_bytes();
                 dev[96..100].copy_from_slice(&h);
             }
 
@@ -439,4 +500,34 @@ pub fn key_press(combo: &str) -> Result<String, String> {
 
     std::thread::sleep(std::time::Duration::from_millis(50));
     Ok(crate::json::success())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_mode_standard() {
+        assert_eq!(parse_mode("1920x1080"), Some((1920, 1080)));
+    }
+
+    #[test]
+    fn test_parse_mode_4k() {
+        assert_eq!(parse_mode("3840x2160"), Some((3840, 2160)));
+    }
+
+    #[test]
+    fn test_parse_mode_invalid() {
+        assert_eq!(parse_mode("not_a_mode"), None);
+        assert_eq!(parse_mode("1920"), None);
+        assert_eq!(parse_mode(""), None);
+        assert_eq!(parse_mode("abcxdef"), None);
+    }
+
+    #[test]
+    fn test_detect_screen_size_returns_positive() {
+        let (w, h) = detect_screen_size();
+        assert!(w > 0, "width must be positive, got {}", w);
+        assert!(h > 0, "height must be positive, got {}", h);
+    }
 }
