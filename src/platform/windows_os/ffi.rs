@@ -172,7 +172,7 @@ pub const DIB_RGB_COLORS: u32 = 0;
 // --- user32.dll ---
 
 #[link(name = "user32")]
-extern "system" {
+unsafe extern "system" {
     pub fn SendInput(cInputs: u32, pInputs: *const INPUT, cbSize: i32) -> u32;
     pub fn GetSystemMetrics(nIndex: i32) -> i32;
     pub fn VkKeyScanW(ch: u16) -> i16;
@@ -191,7 +191,7 @@ extern "system" {
 // --- gdi32.dll ---
 
 #[link(name = "gdi32")]
-extern "system" {
+unsafe extern "system" {
     pub fn CreateCompatibleDC(hdc: HDC) -> HDC;
     pub fn CreateCompatibleBitmap(hdc: HDC, cx: i32, cy: i32) -> HBITMAP;
     pub fn SelectObject(hdc: HDC, h: HGDIOBJ) -> HGDIOBJ;

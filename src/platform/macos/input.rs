@@ -124,7 +124,7 @@ pub fn key_press(combo: &str) -> Result<String, String> {
 fn get_cursor_position() -> CGPoint {
     // Create a dummy mouse event to read current position
     // CGEventCreate returns an event at the current cursor position
-    extern "C" {
+    unsafe extern "C" {
         fn CGEventCreate(source: *const c_void) -> *mut c_void;
         fn CGEventGetLocation(event: *const c_void) -> CGPoint;
     }

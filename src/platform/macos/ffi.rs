@@ -85,7 +85,7 @@ pub const NSApplicationActivateIgnoringOtherApps: u64 = 1 << 1;
 // --- CoreGraphics FFI ---
 
 #[link(name = "CoreGraphics", kind = "framework")]
-extern "C" {
+unsafe extern "C" {
     // Events
     pub fn CGEventCreateMouseEvent(
         source: *const c_void,
@@ -137,7 +137,7 @@ extern "C" {
 // --- CoreFoundation FFI ---
 
 #[link(name = "CoreFoundation", kind = "framework")]
-extern "C" {
+unsafe extern "C" {
     pub fn CFRelease(cf: *mut c_void);
 
     // CFArray
@@ -174,7 +174,7 @@ extern "C" {
 // --- Window dictionary keys ---
 
 #[link(name = "CoreGraphics", kind = "framework")]
-extern "C" {
+unsafe extern "C" {
     pub static kCGWindowNumber: *const c_void;
     pub static kCGWindowOwnerPID: *const c_void;
     pub static kCGWindowName: *const c_void;
@@ -186,7 +186,7 @@ extern "C" {
 // --- Objective-C runtime ---
 
 #[link(name = "objc", kind = "dylib")]
-extern "C" {
+unsafe extern "C" {
     pub fn objc_getClass(name: *const u8) -> *mut c_void;
     pub fn sel_registerName(name: *const u8) -> *mut c_void;
     pub fn objc_msgSend(receiver: *mut c_void, selector: *mut c_void, ...) -> *mut c_void;

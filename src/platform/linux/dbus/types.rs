@@ -15,7 +15,7 @@ impl MarshalBuffer {
     }
 
     pub fn align(&mut self, alignment: usize) {
-        while self.data.len() % alignment != 0 {
+        while !self.data.len().is_multiple_of(alignment) {
             self.data.push(0);
         }
     }
@@ -83,7 +83,7 @@ impl MarshalBuffer {
     pub fn finish_array(&mut self, len_pos: usize) {
         let len_field_end = len_pos + 4;
         let mut data_start = len_field_end;
-        while data_start < self.data.len() && data_start % 8 != 0 && data_start < len_field_end + 8 {
+        while data_start < self.data.len() && !data_start.is_multiple_of(8) && data_start < len_field_end + 8 {
             data_start += 1;
         }
         if data_start > self.data.len() {
@@ -120,7 +120,7 @@ impl<'a> UnmarshalBuffer<'a> {
     }
 
     pub fn align(&mut self, alignment: usize) {
-        while self.pos % alignment != 0 && self.pos < self.data.len() {
+        while !self.pos.is_multiple_of(alignment) && self.pos < self.data.len() {
             self.pos += 1;
         }
     }

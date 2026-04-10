@@ -146,21 +146,19 @@ impl DbusConnection {
         loop {
             let reply = self.read_next_message()?;
 
-            if let Some(rs) = reply.header.reply_serial {
-                if rs == expected_serial {
+            if let Some(rs) = reply.header.reply_serial
+                && rs == expected_serial {
                     if reply.header.msg_type == message::ERROR {
                         let error_name = reply.header.error_name.clone().unwrap_or_default();
                         let mut msg = error_name.clone();
-                        if !reply.body.is_empty() {
-                            if let Ok(s) = super::types::UnmarshalBuffer::new(&reply.body).read_string() {
+                        if !reply.body.is_empty()
+                            && let Ok(s) = super::types::UnmarshalBuffer::new(&reply.body).read_string() {
                                 msg = format!("{}: {}", error_name, s);
                             }
-                        }
                         return Err(msg);
                     }
                     return Ok(reply);
                 }
-            }
         }
     }
 

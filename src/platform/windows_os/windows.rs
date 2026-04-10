@@ -1,4 +1,3 @@
-use std::ffi::c_void;
 use crate::json::{self, JsonValue};
 use super::ffi::*;
 
@@ -85,35 +84,37 @@ fn enum_visible_windows() -> Vec<WindowInfo> {
     let mut windows: Vec<WindowInfo> = Vec::new();
 
     unsafe extern "system" fn callback(hwnd: HWND, lparam: LPARAM) -> BOOL {
-        let windows = &mut *(lparam as *mut Vec<WindowInfo>);
+        unsafe {
+            let windows = &mut *(lparam as *mut Vec<WindowInfo>);
 
-        // Skip invisible windows
-        if IsWindowVisible(hwnd) == 0 {
-            return 1;
+            // Skip invisible windows
+            if IsWindowVisible(hwnd) == 0 {
+                return 1;
+            }
+
+            // Skip windows with no title
+            let title = match get_window_title(hwnd) {
+                Some(t) if !t.is_empty() => t,
+                _ => return 1,
+            };
+
+            // Get PID
+            let mut pid: u32 = 0;
+            GetWindowThreadProcessId(hwnd, &mut pid);
+
+            // Get bounds
+            let mut rect = RECT::default();
+            GetWindowRect(hwnd, &mut rect);
+
+            windows.push(WindowInfo {
+                hwnd: hwnd as u64,
+                title,
+                pid,
+                rect,
+            });
+
+            1 // continue enumeration
         }
-
-        // Skip windows with no title
-        let title = match get_window_title(hwnd) {
-            Some(t) if !t.is_empty() => t,
-            _ => return 1,
-        };
-
-        // Get PID
-        let mut pid: u32 = 0;
-        GetWindowThreadProcessId(hwnd, &mut pid);
-
-        // Get bounds
-        let mut rect = RECT::default();
-        GetWindowRect(hwnd, &mut rect);
-
-        windows.push(WindowInfo {
-            hwnd: hwnd as u64,
-            title,
-            pid,
-            rect,
-        });
-
-        1 // continue enumeration
     }
 
     unsafe {
