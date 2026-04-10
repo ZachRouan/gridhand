@@ -49,7 +49,7 @@ pub fn find_window_by_title(title: &str) -> Result<Option<(u32, String)>, String
         if let Some(win_title) = crate::json::extract_json_string(entry, "title") {
             if win_title.to_lowercase().contains(&title_lower) {
                 if let Some(win_id) = crate::json::extract_json_number(entry, "id") {
-                    return Ok(Some((win_id, entry.to_string())));
+                    return Ok(Some((win_id as u32, entry.to_string())));
                 }
             }
         }

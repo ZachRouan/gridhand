@@ -146,13 +146,19 @@ pub fn extract_json_string<'a>(json: &'a str, key: &str) -> Option<&'a str> {
     Some(&after_colon[start..end])
 }
 
-pub fn extract_json_number(json: &str, key: &str) -> Option<u32> {
+pub fn extract_json_number(json: &str, key: &str) -> Option<i64> {
     let pattern = format!("\"{}\"", key);
     let idx = json.find(&pattern)?;
     let after_key = &json[idx + pattern.len()..];
     let after_colon = after_key.trim_start().strip_prefix(':')?;
     let after_colon = after_colon.trim_start();
-    let end = after_colon.find(|c: char| !c.is_ascii_digit()).unwrap_or(after_colon.len());
+    // Allow optional leading '-' followed by digits
+    let end = after_colon
+        .find(|c: char| c != '-' && !c.is_ascii_digit())
+        .unwrap_or(after_colon.len());
+    if end == 0 {
+        return None;
+    }
     after_colon[..end].parse().ok()
 }
 
@@ -394,6 +400,12 @@ mod tests {
     #[test]
     fn test_extract_number_zero() {
         assert_eq!(extract_json_number("{\"id\":0}", "id"), Some(0));
+    }
+
+    #[test]
+    fn test_extract_number_negative() {
+        assert_eq!(extract_json_number("{\"x\":-500}", "x"), Some(-500));
+        assert_eq!(extract_json_number("{\"x\":-500,\"y\":-200}", "y"), Some(-200));
     }
 
     #[test]

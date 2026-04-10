@@ -29,9 +29,9 @@ pub fn get_window_bounds(id: u64) -> Result<(i32, i32, u32, u32), String> {
     let y = crate::json::extract_json_number(&details, "y")
         .ok_or("Window details missing 'y'")? as i32;
     let w = crate::json::extract_json_number(&details, "width")
-        .ok_or("Window details missing 'width'")?;
+        .ok_or("Window details missing 'width'")? as u32;
     let h = crate::json::extract_json_number(&details, "height")
-        .ok_or("Window details missing 'height'")?;
+        .ok_or("Window details missing 'height'")? as u32;
     Ok((x, y, w, h))
 }
 

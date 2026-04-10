@@ -74,7 +74,7 @@ pub fn find_window_by_title(conn: &mut DbusConnection, title: &str) -> Result<Op
     for window in crate::json::split_json_array(&windows_json) {
         if let (Some(win_title), Some(win_id)) = (crate::json::extract_json_string(window, "title"), crate::json::extract_json_number(window, "id")) {
             if win_title.to_lowercase().contains(&title_lower) {
-                return Ok(Some((win_id, window.to_string())));
+                return Ok(Some((win_id as u32, window.to_string())));
             }
         }
     }

@@ -55,19 +55,19 @@ pub fn screenshot_window(title: &str, output: &str) -> Result<String, String> {
     let uri = take_portal_screenshot(&mut conn)?;
     let src_path = uri_to_path(&uri)?;
 
-    // Read, crop, and write the PNG
+    // Read, crop, and write the PNG (clamp negative coords to 0)
     let full_img = crate::platform::png::read_png(&src_path)?;
-    let cropped = crate::platform::png::crop(&full_img, win_x, win_y, win_w, win_h)?;
+    let cropped = crate::platform::png::crop(&full_img, win_x.max(0) as u32, win_y.max(0) as u32, win_w.max(0) as u32, win_h.max(0) as u32)?;
     crate::platform::png::write_png(output, &cropped)?;
 
     Ok(json::success_with(vec![
         ("path", JsonValue::Str(output)),
         ("window", JsonValue::RawJson(win_json)),
         ("bounds", JsonValue::Object(vec![
-            ("x", JsonValue::Int(win_x as i64)),
-            ("y", JsonValue::Int(win_y as i64)),
-            ("width", JsonValue::Int(win_w as i64)),
-            ("height", JsonValue::Int(win_h as i64)),
+            ("x", JsonValue::Int(win_x)),
+            ("y", JsonValue::Int(win_y)),
+            ("width", JsonValue::Int(win_w)),
+            ("height", JsonValue::Int(win_h)),
         ])),
     ]))
 }
@@ -104,18 +104,18 @@ pub fn screenshot_window_by_id(id: u64, output: &str) -> Result<String, String> 
     let uri = take_portal_screenshot(&mut conn)?;
     let src_path = uri_to_path(&uri)?;
 
-    // Read, crop, and write the PNG
+    // Read, crop, and write the PNG (clamp negative coords to 0)
     let full_img = crate::platform::png::read_png(&src_path)?;
-    let cropped = crate::platform::png::crop(&full_img, win_x, win_y, win_w, win_h)?;
+    let cropped = crate::platform::png::crop(&full_img, win_x.max(0) as u32, win_y.max(0) as u32, win_w.max(0) as u32, win_h.max(0) as u32)?;
     crate::platform::png::write_png(output, &cropped)?;
 
     Ok(json::success_with(vec![
         ("path", JsonValue::Str(output)),
         ("bounds", JsonValue::Object(vec![
-            ("x", JsonValue::Int(win_x as i64)),
-            ("y", JsonValue::Int(win_y as i64)),
-            ("width", JsonValue::Int(win_w as i64)),
-            ("height", JsonValue::Int(win_h as i64)),
+            ("x", JsonValue::Int(win_x)),
+            ("y", JsonValue::Int(win_y)),
+            ("width", JsonValue::Int(win_w)),
+            ("height", JsonValue::Int(win_h)),
         ])),
     ]))
 }
