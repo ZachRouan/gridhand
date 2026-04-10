@@ -27,20 +27,73 @@ fn cache_path() -> String {
     format!("{}/gui-tool-screenshot-cache.png", tmp.display())
 }
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+const HELP: &str = "\
+gui-tool — programmatic GUI interaction for AI agents
+
+USAGE:
+    gui-tool <command> [options]
+
+COMMANDS:
+    screenshot [options]            Take a screenshot
+        --window <title>            Screenshot a specific window (by title substring)
+        --window-id <id>            Screenshot a specific window (by numeric ID)
+        --grid [WxH]                Overlay a labeled grid (default: auto-scaled)
+        --cell <ref>                Crop to a grid cell (supports zoom: B2.C1)
+        --output <path>             Output file path
+
+    windows list                    List all open windows
+    windows raise <id>              Raise a window by ID
+
+    mouse move <x> <y> [options]    Move mouse to absolute coordinates
+        --window <title>            Move relative to window (by title)
+        --window-id <id>            Move relative to window (by ID)
+        --cell <ref> --window-id <id>  Move to grid cell center
+        --grid WxH                  Grid dimensions for cell targeting
+
+    mouse click [options]           Click at current position
+        --button left|right         Button to click (default: left)
+        --window <title>            Raise window before clicking
+        --window-id <id>            Raise window before clicking
+
+    key type <text> [options]       Type text string
+        --window <title>            Raise window before typing
+        --window-id <id>            Raise window before typing
+
+    key press <combo> [options]     Press key combination (e.g. ctrl+c)
+        --window <title>            Raise window before pressing
+        --window-id <id>            Raise window before pressing
+
+OPTIONS:
+    --help                          Show this help message
+    --version                       Show version
+
+OUTPUT:
+    All output is JSON to stdout. Errors are JSON to stderr.";
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
     if args.len() < 2 {
-        eprintln!("{}", json::error("Usage: gui-tool <command> [args...]"));
+        eprintln!("{}", json::error("Usage: gui-tool <command> [args...]. Try 'gui-tool --help'"));
         std::process::exit(1);
     }
 
     let result = match args[1].as_str() {
+        "--help" | "-h" | "help" => {
+            println!("{}", HELP);
+            std::process::exit(0);
+        }
+        "--version" | "-V" => {
+            println!("gui-tool {}", VERSION);
+            std::process::exit(0);
+        }
         "screenshot" => cmd_screenshot(&args[2..]),
         "windows" => cmd_windows(&args[2..]),
         "mouse" => cmd_mouse(&args[2..]),
         "key" => cmd_key(&args[2..]),
-        _ => Err(format!("Unknown command: {}", args[1])),
+        _ => Err(format!("Unknown command: {}. Try 'gui-tool --help'", args[1])),
     };
 
     match result {
