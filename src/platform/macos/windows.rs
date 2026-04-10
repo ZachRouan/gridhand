@@ -35,6 +35,10 @@ pub fn raise_window(id: u64) -> Result<String, String> {
         let msg_send: extern "C" fn(*mut c_void, *mut c_void, u64) -> bool =
             std::mem::transmute(objc_msgSend as *const c_void);
         msg_send(app, sel, NSApplicationActivateIgnoringOtherApps);
+
+        // Raise the specific window (not just the app) using CGSOrderWindow
+        let conn = CGSMainConnectionID();
+        CGSOrderWindow(conn, id as i32, 1, 0); // 1 = above, 0 = above all
     }
 
     Ok(json::success())
