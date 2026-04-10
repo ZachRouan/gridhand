@@ -128,7 +128,7 @@ pub fn split_json_array(json: &str) -> Vec<&str> {
     results
 }
 
-pub fn extract_json_string<'a>(json: &'a str, key: &str) -> Option<&'a str> {
+pub fn extract_json_string(json: &str, key: &str) -> Option<String> {
     let pattern = format!("\"{}\"", key);
     let idx = json.find(&pattern)?;
     let after_key = &json[idx + pattern.len()..];
@@ -143,7 +143,32 @@ pub fn extract_json_string<'a>(json: &'a str, key: &str) -> Option<&'a str> {
         if bytes[end] == b'"' { break; }
         end += 1;
     }
-    Some(&after_colon[start..end])
+    Some(decode_json_escapes(&after_colon[start..end]))
+}
+
+fn decode_json_escapes(s: &str) -> String {
+    if !s.contains('\\') {
+        return s.to_string();
+    }
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next() {
+                Some('"') => result.push('"'),
+                Some('\\') => result.push('\\'),
+                Some('n') => result.push('\n'),
+                Some('r') => result.push('\r'),
+                Some('t') => result.push('\t'),
+                Some('/') => result.push('/'),
+                Some(other) => { result.push('\\'); result.push(other); }
+                None => result.push('\\'),
+            }
+        } else {
+            result.push(c);
+        }
+    }
+    result
 }
 
 pub fn extract_json_number(json: &str, key: &str) -> Option<i64> {
@@ -346,22 +371,23 @@ mod tests {
 
     #[test]
     fn test_extract_string_basic() {
-        assert_eq!(extract_json_string("{\"title\":\"Firefox\"}", "title"), Some("Firefox"));
+        assert_eq!(extract_json_string("{\"title\":\"Firefox\"}", "title"), Some("Firefox".to_string()));
     }
 
     #[test]
     fn test_extract_string_with_spaces() {
         assert_eq!(
             extract_json_string("{\"title\" : \"My Window\"}", "title"),
-            Some("My Window")
+            Some("My Window".to_string())
         );
     }
 
     #[test]
     fn test_extract_string_escaped_quotes() {
+        // Escape sequences are decoded: \" becomes "
         assert_eq!(
             extract_json_string("{\"title\":\"say \\\"hello\\\"\"}", "title"),
-            Some("say \\\"hello\\\"")
+            Some("say \"hello\"".to_string())
         );
     }
 
@@ -378,21 +404,22 @@ mod tests {
 
     #[test]
     fn test_extract_string_empty_value() {
-        assert_eq!(extract_json_string("{\"title\":\"\"}", "title"), Some(""));
+        assert_eq!(extract_json_string("{\"title\":\"\"}", "title"), Some(String::new()));
     }
 
     #[test]
     fn test_extract_string_multiple_keys() {
         let json = "{\"id\":1,\"title\":\"Test\",\"owner\":\"App\"}";
-        assert_eq!(extract_json_string(json, "title"), Some("Test"));
-        assert_eq!(extract_json_string(json, "owner"), Some("App"));
+        assert_eq!(extract_json_string(json, "title"), Some("Test".to_string()));
+        assert_eq!(extract_json_string(json, "owner"), Some("App".to_string()));
     }
 
     #[test]
     fn test_extract_string_with_backslash_in_value() {
+        // Escape sequences are decoded: \\ becomes \
         assert_eq!(
             extract_json_string("{\"path\":\"C:\\\\Users\\\\test\"}", "path"),
-            Some("C:\\\\Users\\\\test")
+            Some("C:\\Users\\test".to_string())
         );
     }
 
