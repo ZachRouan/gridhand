@@ -280,8 +280,9 @@ impl UinputDevice {
             check_ioctl(ioctl(fd, UI_DEV_CREATE, 0), "UI_DEV_CREATE")?;
         }
 
-        // Let kernel register the device
-        std::thread::sleep(std::time::Duration::from_millis(200));
+        // Wait for display server to detect the new input device.
+        // Xorg (inotify) and Wayland (libinput/udev) typically bind in <20ms.
+        std::thread::sleep(std::time::Duration::from_millis(50));
 
         Ok(UinputDevice { file })
     }
