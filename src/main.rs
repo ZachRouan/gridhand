@@ -1,6 +1,7 @@
 mod grid;
 mod json;
 mod platform;
+mod validate;
 
 /// Minimum dimensions for zoomed crop scale-up.
 /// Ensures cropped regions are large enough for vision models to read.
@@ -231,6 +232,7 @@ fn cmd_screenshot(args: &[String]) -> Result<String, String> {
     }
 
     let output = output_path.as_deref().unwrap_or("/tmp/gui-tool-screenshot.png");
+    validate::output_path(output)?;
 
     // When zooming with --cell, try to reuse cached screenshot instead of taking a new one
     let use_cache = cell.is_some() && cache_is_fresh();
@@ -380,6 +382,7 @@ fn cmd_mouse(args: &[String]) -> Result<String, String> {
                     x += wx;
                     y += wy;
                 }
+                validate::coordinates(x, y)?;
                 platform::mouse_move(x, y)
             }
         }
