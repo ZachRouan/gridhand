@@ -3,19 +3,36 @@ use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::AsRawFd;
 
-// ioctl via raw syscall (x86_64 Linux syscall number 16)
+#[cfg(target_arch = "x86_64")]
 unsafe fn ioctl(fd: i32, request: u64, arg: u64) -> i64 {
     let ret: i64;
     unsafe {
         std::arch::asm!(
             "syscall",
-            in("rax") 16u64,
+            in("rax") 16u64, // __NR_ioctl on x86_64
             in("rdi") fd as u64,
             in("rsi") request,
             in("rdx") arg,
             lateout("rax") ret,
             out("rcx") _,
             out("r11") _,
+            options(nostack),
+        );
+    }
+    ret
+}
+
+#[cfg(target_arch = "aarch64")]
+unsafe fn ioctl(fd: i32, request: u64, arg: u64) -> i64 {
+    let ret: i64;
+    unsafe {
+        std::arch::asm!(
+            "svc #0",
+            in("x8") 29u64, // __NR_ioctl on aarch64
+            in("x0") fd as u64,
+            in("x1") request,
+            in("x2") arg,
+            lateout("x0") ret,
             options(nostack),
         );
     }

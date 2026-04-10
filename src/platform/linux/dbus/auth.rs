@@ -42,15 +42,30 @@ fn read_line(stream: &mut UnixStream) -> Result<String, String> {
     String::from_utf8(buf).map_err(|e| format!("Invalid UTF-8 in auth reply: {}", e))
 }
 
+#[cfg(target_arch = "x86_64")]
 pub fn get_uid() -> u32 {
     let ret: u64;
     unsafe {
         std::arch::asm!(
             "syscall",
-            in("rax") 102u64,
+            in("rax") 102u64, // __NR_getuid on x86_64
             lateout("rax") ret,
             out("rcx") _,
             out("r11") _,
+            options(nostack, nomem),
+        );
+    }
+    ret as u32
+}
+
+#[cfg(target_arch = "aarch64")]
+pub fn get_uid() -> u32 {
+    let ret: u64;
+    unsafe {
+        std::arch::asm!(
+            "svc #0",
+            in("x8") 174u64, // __NR_getuid on aarch64
+            lateout("x0") ret,
             options(nostack, nomem),
         );
     }
