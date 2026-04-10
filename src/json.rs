@@ -112,8 +112,8 @@ pub fn split_json_array(json: &str) -> Vec<&str> {
         }
         if in_string { continue; }
         match ch {
-            '{' => depth += 1,
-            '}' => depth -= 1,
+            '{' | '[' => depth += 1,
+            '}' | ']' => depth -= 1,
             ',' if depth == 0 => {
                 results.push(inner[start..i].trim());
                 start = i + 1;
@@ -334,6 +334,12 @@ mod tests {
     fn test_split_with_brackets_in_strings() {
         let result = split_json_array("[{\"val\":\"[not,an,array]\"}]");
         assert_eq!(result, vec!["{\"val\":\"[not,an,array]\"}"]);
+    }
+
+    #[test]
+    fn test_split_with_nested_arrays() {
+        let result = split_json_array("[{\"tags\":[\"pinned\",\"ws-2\"]},{\"id\":2}]");
+        assert_eq!(result, vec!["{\"tags\":[\"pinned\",\"ws-2\"]}", "{\"id\":2}"]);
     }
 
     // === extract_json_string ===
