@@ -108,6 +108,7 @@ fn main() {
 /// Pre-parse args to extract --window and --window-id flags.
 /// Returns (remaining_args, Option<(id, x, y, w, h)>).
 /// If a window flag is present, raises the window and sleeps for focus.
+#[allow(clippy::type_complexity)]
 fn extract_window_flags(args: &[String]) -> Result<(Vec<String>, Option<(u64, i32, i32, u32, u32)>), String> {
     let mut remaining = Vec::new();
     let mut window_title: Option<String> = None;
@@ -169,13 +170,11 @@ fn invalidate_cache() {
 
 /// Check if the screenshot cache file exists and is recent enough to reuse.
 fn cache_is_fresh() -> bool {
-    if let Ok(meta) = std::fs::metadata(&cache_path()) {
-        if let Ok(modified) = meta.modified() {
-            if let Ok(elapsed) = modified.elapsed() {
+    if let Ok(meta) = std::fs::metadata(cache_path())
+        && let Ok(modified) = meta.modified()
+            && let Ok(elapsed) = modified.elapsed() {
                 return elapsed.as_secs() < CACHE_MAX_AGE_SECS;
             }
-        }
-    }
     false
 }
 
@@ -183,8 +182,8 @@ fn cache_is_fresh() -> bool {
 /// Larger images get denser grids; smaller (zoomed) images get coarser grids.
 /// Grid cells target ~40px minimum to keep labels readable while maximizing precision.
 fn auto_grid(width: u32, height: u32) -> (u32, u32) {
-    let max_cols = (width / 40).max(3).min(8);
-    let max_rows = (height / 40).max(3).min(6);
+    let max_cols = (width / 40).clamp(3, 8);
+    let max_rows = (height / 40).clamp(3, 6);
     (max_cols, max_rows)
 }
 
@@ -315,13 +314,12 @@ fn cmd_screenshot(args: &[String]) -> Result<String, String> {
             "--grid" => {
                 grid_enabled = true;
                 // Check if next arg is an explicit WxH value
-                if let Some(next) = args.get(i + 1) {
-                    if !next.starts_with('-') && next.contains('x') {
+                if let Some(next) = args.get(i + 1)
+                    && !next.starts_with('-') && next.contains('x') {
                         grid = Some(parse_grid(next)?);
                         i += 1;
                     }
                     // else: no explicit value, auto-scale will be used
-                }
             }
             "--cell" => {
                 i += 1;
@@ -346,15 +344,15 @@ fn cmd_screenshot(args: &[String]) -> Result<String, String> {
         json::success_with(vec![("path", json::JsonValue::Str(output))])
     } else if let Some(title) = &window_title {
         let r = platform::screenshot_window(title, output)?;
-        let _ = std::fs::copy(output, &cache_path());
+        let _ = std::fs::copy(output, cache_path());
         r
     } else if let Some(id) = window_id {
         let r = platform::screenshot_window_by_id(id, output)?;
-        let _ = std::fs::copy(output, &cache_path());
+        let _ = std::fs::copy(output, cache_path());
         r
     } else {
         let r = platform::screenshot_full(output)?;
-        let _ = std::fs::copy(output, &cache_path());
+        let _ = std::fs::copy(output, cache_path());
         r
     };
 
@@ -445,12 +443,11 @@ fn cmd_mouse(args: &[String]) -> Result<String, String> {
                 cell = Some(remaining.get(i).ok_or("--cell requires a cell reference")?.clone());
             }
             "--grid" => {
-                if let Some(next) = remaining.get(i + 1) {
-                    if !next.starts_with('-') && next.contains('x') {
+                if let Some(next) = remaining.get(i + 1)
+                    && !next.starts_with('-') && next.contains('x') {
                         explicit_grid = Some(parse_grid(next)?);
                         i += 1;
                     }
-                }
             }
             "--button" => {
                 positional.push(remaining[i].clone());
@@ -476,7 +473,7 @@ fn cmd_mouse(args: &[String]) -> Result<String, String> {
                 platform::mouse_move(x, y)
             } else {
                 // Coordinate-based targeting
-                let mut x: i32 = positional.get(0)
+                let mut x: i32 = positional.first()
                     .ok_or("Usage: gui-tool mouse move <x> <y> or --cell <ref>")?
                     .parse().map_err(|_| "Invalid x coordinate")?;
                 let mut y: i32 = positional.get(1)
@@ -528,14 +525,14 @@ fn cmd_key(args: &[String]) -> Result<String, String> {
 
     match subcmd {
         "type" => {
-            let text = remaining.get(0)
+            let text = remaining.first()
                 .ok_or("Usage: gui-tool key type <text>")?;
             let result = platform::key_type(text);
             invalidate_cache();
             result
         }
         "press" => {
-            let combo = remaining.get(0)
+            let combo = remaining.first()
                 .ok_or("Usage: gui-tool key press <combo>")?;
             let result = platform::key_press(combo);
             invalidate_cache();

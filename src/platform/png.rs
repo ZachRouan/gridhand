@@ -1,7 +1,7 @@
-/// Minimal PNG reader/writer for cropping — zero dependencies.
-///
-/// Reads PNG files (decompresses IDAT via inflate, undoes row filters),
-/// crops a rectangular region, and writes a new PNG with stored (uncompressed) IDAT blocks.
+//! Minimal PNG reader/writer for cropping — zero dependencies.
+//!
+//! Reads PNG files (decompresses IDAT via inflate, undoes row filters),
+//! crops a rectangular region, and writes a new PNG with deflate-compressed IDAT blocks.
 
 /// Decoded image data.
 pub struct Image {
@@ -38,8 +38,8 @@ pub fn scale_up(img: &Image, min_width: u32, min_height: u32) -> Image {
         };
     }
 
-    let scale_x = if img.width > 0 { (min_width + img.width - 1) / img.width } else { 1 };
-    let scale_y = if img.height > 0 { (min_height + img.height - 1) / img.height } else { 1 };
+    let scale_x = if img.width > 0 { min_width.div_ceil(img.width) } else { 1 };
+    let scale_y = if img.height > 0 { min_height.div_ceil(img.height) } else { 1 };
     let scale = scale_x.max(scale_y).max(1);
 
     let new_w = img.width * scale;
@@ -53,9 +53,7 @@ pub fn scale_up(img: &Image, min_width: u32, min_height: u32) -> Image {
             let src_y = y / scale;
             let src_idx = (src_y * img.width + src_x) as usize * bpp;
             let dst_idx = (y * new_w + x) as usize * bpp;
-            for c in 0..bpp {
-                pixels[dst_idx + c] = img.pixels[src_idx + c];
-            }
+            pixels[dst_idx..dst_idx + bpp].copy_from_slice(&img.pixels[src_idx..src_idx + bpp]);
         }
     }
 
@@ -450,10 +448,10 @@ fn inflate(data: &[u8]) -> Result<Vec<u8>, String> {
 
 fn build_fixed_lit_table() -> HuffmanTable {
     let mut lengths = [0u8; 288];
-    for i in 0..=143 { lengths[i] = 8; }
-    for i in 144..=255 { lengths[i] = 9; }
-    for i in 256..=279 { lengths[i] = 7; }
-    for i in 280..=287 { lengths[i] = 8; }
+    lengths[..=143].fill(8);
+    lengths[144..=255].fill(9);
+    lengths[256..=279].fill(7);
+    lengths[280..=287].fill(8);
     HuffmanTable::from_lengths(&lengths).unwrap()
 }
 
@@ -540,11 +538,11 @@ fn build_dynamic_tables(reader: &mut BitReader) -> Result<(HuffmanTable, Huffman
             }
             17 => {
                 let repeat = reader.read_bits(3) as usize + 3;
-                for _ in 0..repeat { lengths.push(0); }
+                lengths.resize(lengths.len() + repeat, 0);
             }
             18 => {
                 let repeat = reader.read_bits(7) as usize + 11;
-                for _ in 0..repeat { lengths.push(0); }
+                lengths.resize(lengths.len() + repeat, 0);
             }
             _ => return Err(format!("Invalid code length symbol: {}", sym)),
         }

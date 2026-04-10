@@ -14,6 +14,7 @@ pub enum JsonValue<'a> {
 }
 
 impl<'a> JsonValue<'a> {
+    #[allow(clippy::inherent_to_string)]
     pub fn to_string(&self) -> String {
         let mut buf = String::new();
         self.write_to(&mut buf);

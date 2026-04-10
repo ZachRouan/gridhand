@@ -182,11 +182,10 @@ fn take_portal_screenshot(conn: &mut DbusConnection) -> Result<String, String> {
         ubuf.align(8);
         let key = ubuf.read_string()?;
         let val = ubuf.read_variant_string()?;
-        if key == "uri" {
-            if let Some(uri) = val {
+        if key == "uri"
+            && let Some(uri) = val {
                 return Ok(uri);
             }
-        }
     }
 
     Err("Screenshot response missing 'uri' field".to_string())

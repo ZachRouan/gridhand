@@ -22,6 +22,7 @@ const FIELD_SIGNATURE: u8 = 8;
 
 const NO_REPLY_EXPECTED: u8 = 0x01;
 
+#[allow(clippy::too_many_arguments)]
 pub fn build_method_call(
     serial: u32,
     destination: &str,
@@ -45,16 +46,12 @@ pub fn build_method_call(
 
     let fields_bytes = fields.into_bytes();
 
-    let mut msg = Vec::new();
-    msg.push(b'l');
-    msg.push(METHOD_CALL);
-    msg.push(flags);
-    msg.push(PROTOCOL_VERSION);
+    let mut msg = vec![b'l', METHOD_CALL, flags, PROTOCOL_VERSION];
     msg.extend_from_slice(&(body.len() as u32).to_le_bytes());
     msg.extend_from_slice(&serial.to_le_bytes());
     msg.extend_from_slice(&(fields_bytes.len() as u32).to_le_bytes());
     msg.extend_from_slice(&fields_bytes);
-    while msg.len() % 8 != 0 {
+    while !msg.len().is_multiple_of(8) {
         msg.push(0);
     }
     msg.extend_from_slice(body);
@@ -196,7 +193,7 @@ pub fn parse_header(data: &[u8]) -> Result<(MessageHeader, usize), String> {
     }
 
     let mut total = fields_end;
-    while total % 8 != 0 {
+    while !total.is_multiple_of(8) {
         total += 1;
     }
 

@@ -219,13 +219,11 @@ fn detect_screen_size() -> (i32, i32) {
     }
 
     // Fallback: framebuffer virtual_size (format: "1920,1080")
-    if let Ok(vs) = std::fs::read_to_string("/sys/class/graphics/fb0/virtual_size") {
-        if let Some((w, h)) = vs.trim().split_once(',') {
-            if let (Ok(w), Ok(h)) = (w.parse::<i32>(), h.parse::<i32>()) {
+    if let Ok(vs) = std::fs::read_to_string("/sys/class/graphics/fb0/virtual_size")
+        && let Some((w, h)) = vs.trim().split_once(',')
+            && let (Ok(w), Ok(h)) = (w.parse::<i32>(), h.parse::<i32>()) {
                 return (w, h);
             }
-        }
-    }
 
     // Ultimate fallback
     (1920, 1080)
