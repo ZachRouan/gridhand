@@ -48,13 +48,11 @@ COMMANDS:
     windows list                    List all open windows
     windows raise <id>              Raise a window by ID
 
-    mouse move <x> <y> [options]    Move mouse to absolute coordinates
-        --window <title>            Move relative to window (by title)
-        --window-id <id>            Move relative to window (by ID)
-        --cell <ref> --window-id <id>  Move to grid cell center
-        --grid WxH                  Grid dimensions for cell targeting
+    mouse move <x> <y>              Move mouse to absolute screen coordinates
 
     mouse click [options]           Click at current position
+        --cell <ref>                Click at grid cell center (requires --window-id)
+        --grid WxH                  Grid dimensions for cell targeting
         --button left|right         Button to click (default: left)
         --window <title>            Raise window before clicking
         --window-id <id>            Raise window before clicking
@@ -376,30 +374,25 @@ fn cmd_mouse(args: &[String]) -> Result<String, String> {
 
     match subcmd {
         "move" => {
+            // Absolute screen coordinates only
+            let x: i32 = positional.first()
+                .ok_or("Usage: gui-tool mouse move <x> <y>")?
+                .parse().map_err(|_| "Invalid x coordinate")?;
+            let y: i32 = positional.get(1)
+                .ok_or("Usage: gui-tool mouse move <x> <y>")?
+                .parse().map_err(|_| "Invalid y coordinate")?;
+            validate::coordinates(x, y)?;
+            platform::mouse_move(x, y)
+        }
+        "click" => {
             if let Some(cell_ref) = &cell {
-                // Cell-based targeting — requires window bounds
+                // Cell-based click — move to cell center and click in one operation
                 let (_, wx, wy, ww, wh) = window_info
                     .ok_or("--cell requires --window or --window-id to know the target window")?;
                 let (x, y) = grid::cell_to_coords(cell_ref, wx, wy, ww, wh, explicit_grid)?;
-                platform::mouse_move(x, y)
-            } else {
-                // Coordinate-based targeting
-                let mut x: i32 = positional.first()
-                    .ok_or("Usage: gui-tool mouse move <x> <y> or --cell <ref>")?
-                    .parse().map_err(|_| "Invalid x coordinate")?;
-                let mut y: i32 = positional.get(1)
-                    .ok_or("Usage: gui-tool mouse move <x> <y>")?
-                    .parse().map_err(|_| "Invalid y coordinate")?;
-
-                if let Some((_, wx, wy, _, _)) = window_info {
-                    x += wx;
-                    y += wy;
-                }
-                validate::coordinates(x, y)?;
-                platform::mouse_move(x, y)
+                platform::mouse_move(x, y)?;
+                std::thread::sleep(std::time::Duration::from_millis(50));
             }
-        }
-        "click" => {
             let mut button = "left";
             let mut j = 0;
             while j < positional.len() {

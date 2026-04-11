@@ -991,7 +991,7 @@ pub fn draw_grid(img: &mut Image, cols: u32, rows: u32) {
         draw_horizontal_line(img, 0, w, y);
     }
 
-    // Draw labels
+    // Draw labels and center crosshairs
     for row in 0..rows {
         for col in 0..cols {
             let label_col = (b'A' + col as u8) as char;
@@ -1008,6 +1008,12 @@ pub fn draw_grid(img: &mut Image, cols: u32, rows: u32) {
             // Draw the two characters (e.g., "A1")
             draw_char_scaled(img, label_col, lx + pad, ly + pad / 2, scale);
             draw_char_scaled(img, label_row_char, lx + pad + GLYPH_WIDTH * scale + 1, ly + pad / 2, scale);
+
+            // Draw crosshair at cell center showing where a click would land
+            let cx = col * cell_w + cell_w / 2;
+            let cy = row * cell_h + cell_h / 2;
+            let arm = if min_cell >= 60 { 6u32 } else { 3u32 };
+            draw_crosshair(img, cx, cy, arm);
         }
     }
 }
@@ -1053,6 +1059,38 @@ fn draw_filled_rect(img: &mut Image, x: u32, y: u32, w: u32, h: u32, color: [u8;
             if px < img.width && py < img.height {
                 set_pixel(img, px, py, color);
             }
+        }
+    }
+}
+
+/// Draw a small crosshair (+) at (cx, cy) with the given arm length.
+/// Red with a 1px black outline for visibility on any background.
+fn draw_crosshair(img: &mut Image, cx: u32, cy: u32, arm: u32) {
+    let red: [u8; 4] = [255, 40, 40, 255];
+    let outline: [u8; 4] = [0, 0, 0, 200];
+
+    // Horizontal arm with outline
+    for dx_i in -(arm as i32)..=(arm as i32) {
+        let px = cx as i32 + dx_i;
+        if px >= 0 && (px as u32) < img.width {
+            let px = px as u32;
+            // Black outline above and below
+            if cy > 0 { set_pixel(img, px, cy - 1, outline); }
+            if cy + 1 < img.height { set_pixel(img, px, cy + 1, outline); }
+            // Red center
+            set_pixel(img, px, cy, red);
+        }
+    }
+    // Vertical arm with outline
+    for dy_i in -(arm as i32)..=(arm as i32) {
+        let py = cy as i32 + dy_i;
+        if py >= 0 && (py as u32) < img.height {
+            let py = py as u32;
+            // Black outline left and right
+            if cx > 0 { set_pixel(img, cx - 1, py, outline); }
+            if cx + 1 < img.width { set_pixel(img, cx + 1, py, outline); }
+            // Red center
+            set_pixel(img, cx, py, red);
         }
     }
 }
