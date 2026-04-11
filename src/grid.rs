@@ -3,9 +3,10 @@ use crate::{ZOOM_MIN_WIDTH, ZOOM_MIN_HEIGHT};
 /// Auto-select grid density based on image dimensions.
 /// Larger images get denser grids; smaller (zoomed) images get coarser grids.
 /// Grid cells target ~40px minimum to keep labels readable while maximizing precision.
+/// Caps at 16 columns (A-P) and 9 rows (1-9) for a full-screen 1920x1080 display.
 pub fn auto_grid(width: u32, height: u32) -> (u32, u32) {
-    let max_cols = (width / 40).clamp(3, 8);
-    let max_rows = (height / 40).clamp(3, 6);
+    let max_cols = (width / 40).clamp(3, 16);
+    let max_rows = (height / 40).clamp(3, 9);
     (max_cols, max_rows)
 }
 
@@ -191,17 +192,22 @@ mod tests {
 
     #[test]
     fn test_auto_grid() {
-        assert_eq!(auto_grid(1280, 800), (8, 6));
+        assert_eq!(auto_grid(1920, 1080), (16, 9));
+        assert_eq!(auto_grid(1280, 800), (16, 9));
+        assert_eq!(auto_grid(640, 480), (16, 9));
+        assert_eq!(auto_grid(640, 400), (16, 9));
+        assert_eq!(auto_grid(320, 240), (8, 6));
         assert_eq!(auto_grid(160, 133), (4, 3));
-        assert_eq!(auto_grid(640, 400), (8, 6));
         assert_eq!(auto_grid(80, 80), (3, 3));
     }
 
     #[test]
     fn test_cell_to_coords_auto_grid() {
+        // 1280x800 → auto_grid = (16, 9), cell = 80x88.8
+        // B2 = col 1, row 1 → center at (120, 133)
         let (x, y) = cell_to_coords("B2", 0, 0, 1280, 800, None).unwrap();
-        assert_eq!(x, 240);
-        assert_eq!(y, 200);
+        assert_eq!(x, 120);
+        assert_eq!(y, 133);
     }
 
     #[test]
@@ -256,14 +262,13 @@ mod tests {
 
     #[test]
     fn test_cell_to_coords_recursive_auto_grid_uses_scaled_density() {
-        // A1 on 1280x800 (auto 8x6) → 160x133 region.
-        // At level 1, this region is conceptually scaled up to 640x532 (4x)
-        // to match the grid drawn on zoomed screenshots, giving auto 8x6.
-        // C1 in that 8x6 sub-grid → center at (50, 11).
-        // Without the scale-up simulation, auto_grid(160,133) = (4,3),
-        // and C1 would target (100, 22) — the wrong spot.
+        // A1 on 1280x800 (auto 16x9) → 80x88 region.
+        // At level 1, scaled up 8x to 640x704 → auto (16, 9).
+        // C1 in that 16x9 sub-grid → center at (12, 4).
+        // Without scale-up simulation, auto_grid(80,88) = (3,3),
+        // and C1 would target (66, 14) — the wrong spot.
         let (x, y) = cell_to_coords("A1.C1", 0, 0, 1280, 800, None).unwrap();
-        assert_eq!(x, 50);
-        assert_eq!(y, 11);
+        assert_eq!(x, 12);
+        assert_eq!(y, 4);
     }
 }
