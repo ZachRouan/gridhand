@@ -90,15 +90,15 @@ The grid system is the only way to click on things. No pixel coordinates exist. 
 
 ### How it works
 
-You zoom into progressively smaller regions until a crosshair lands on your target. At each level you carry forward your spatial knowledge of where the target is within the current cell.
+The workflow is a loop: **orient → zoom → zoom → ... → click → verify**. You keep zooming until a crosshair is on your target. Each zoom narrows the region. At each level you carry forward your spatial knowledge of where the target sits within the current cell.
 
-### Step 1: Orient — full grid screenshot
+### Orient
 ```bash
 gui-tool screenshot --window-id 123 --grid --output /tmp/grid.png
 ```
 Read the image. Identify which cell contains your target. Note the target's position **within** that cell (e.g., "the search bar is in D1, sitting in the lower-left portion of the cell"). This position is critical — you will use it at every subsequent zoom level.
 
-### Step 2: Zoom — narrow the region
+### Zoom (repeat until precise)
 ```bash
 gui-tool screenshot --window-id 123 --grid --cell D1 --output /tmp/zoom.png
 ```
@@ -108,23 +108,27 @@ This crops to D1, scales it up, and draws a new sub-grid with new crosshairs.
 - "The search bar was in the lower-left of D1" → pick a sub-cell in the lower-left, like B5 or C5
 - "The button was in the upper-right of B3" → pick a sub-cell like G1 or H1
 
-If you need more precision (small buttons, icons, dense UI), zoom again:
+Then zoom again to verify and refine:
 ```bash
 gui-tool screenshot --window-id 123 --grid --cell D1.C5 --output /tmp/zoom2.png
 ```
-Each zoom narrows the region further. Continue zooming until a crosshair is on your target. Carry your spatial knowledge forward at each level.
+Now you can see the sub-region in detail. Is a crosshair on your target? If yes, click. If no, pick a better sub-cell and zoom again:
+```bash
+gui-tool screenshot --window-id 123 --grid --cell D1.C5.F3 --output /tmp/zoom3.png
+```
+**Keep zooming until a crosshair is clearly on the target.** Small buttons and icons may need 3+ zoom levels. This is normal.
 
-### Step 3: Click
+### Click
 ```bash
 gui-tool mouse click --cell D1.C5.F3 --window-id 123
 ```
 The tool calculates the final crosshair position through all zoom levels and clicks there.
 
-### Step 4: Verify
-Take a plain screenshot (no grid) after clicking to confirm you hit the right element. If you missed, start over from step 1 — the screen state has changed.
+### Verify
+Take a plain screenshot (no grid) after clicking to confirm you hit the right element. If you missed, start over from Orient — the screen state has changed.
 
 ### Key rules
-- **Always zoom before clicking.** The full grid is for orientation only.
+- **Zoom is a loop, not a single step.** Keep zooming until a crosshair is on the target. 2-3 levels is typical.
 - **Spatial reasoning, not visual search.** Pick sub-cells based on where the target sat in the parent cell. Never hunt through zoomed crops looking for text.
 - **Carry position forward.** At each zoom level, ask: "where within this cell was my target?" Then pick the matching sub-cell.
 - **If you're lost, start over.** Take a fresh full grid screenshot and re-orient. Don't keep zooming into random cells.
