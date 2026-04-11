@@ -28,7 +28,7 @@ gui-tool key press "ctrl+a" --window-id 123          # key combo (ctrl/shift/alt
 
 ## Grid Targeting
 
-No pixel coordinates exist. The grid is the only way to click. Each cell has a red crosshair (+) showing exactly where a click lands.
+No pixel coordinates exist. The grid is the only way to click. Each cell has a red crosshair (+) at its center — a click on that cell lands **exactly on that crosshair, nowhere else**. If the crosshair isn't on your target, the click will miss. Zoom until a crosshair sits directly on the target.
 
 ### Orient → Zoom → Click → Verify
 
