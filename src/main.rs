@@ -42,7 +42,7 @@ COMMANDS:
         --window <title>            Screenshot a specific window (by title substring)
         --window-id <id>            Screenshot a specific window (by numeric ID)
         --grid [WxH]                Overlay a labeled grid (default: auto-scaled)
-        --cell <ref>                Crop to a grid cell (supports zoom: B2.C1)
+        --cell <ref>                Crop to a grid cell (B2.C1 zoom, D3+E3 between cells)
         --output <path>             Output file path
 
     windows list                    List all open windows
@@ -282,14 +282,25 @@ fn cmd_screenshot(args: &[String]) -> Result<String, String> {
                 } else {
                     grid::auto_grid(img.width, img.height)
                 };
-                let (col, row) = grid::parse_cell_ref(part)?;
-                if col >= cols || row >= rows {
-                    return Err(format!("Cell '{}' out of range for {}x{} grid", part, cols, rows));
-                }
                 let cell_w = img.width / cols;
                 let cell_h = img.height / rows;
-                let cx = col * cell_w;
-                let cy = row * cell_h;
+
+                // Parse cell reference — single cell (D3) or between two cells (D3+E3)
+                let (cx, cy, single_cell) = if part.contains('+') {
+                    let ((c1, r1), (c2, r2)) = grid::parse_between_ref(part)?;
+                    if c1 >= cols || r1 >= rows || c2 >= cols || r2 >= rows {
+                        return Err(format!("Cell '{}' out of range for {}x{} grid", part, cols, rows));
+                    }
+                    let cx = ((c1 + c2) * cell_w / 2).min(img.width.saturating_sub(cell_w));
+                    let cy = ((r1 + r2) * cell_h / 2).min(img.height.saturating_sub(cell_h));
+                    (cx, cy, None)
+                } else {
+                    let (col, row) = grid::parse_cell_ref(part)?;
+                    if col >= cols || row >= rows {
+                        return Err(format!("Cell '{}' out of range for {}x{} grid", part, cols, rows));
+                    }
+                    (col * cell_w, row * cell_h, Some((col, row)))
+                };
 
                 if is_last {
                     // Final level: crop with context padding (half cell on each side)
@@ -302,7 +313,9 @@ fn cmd_screenshot(args: &[String]) -> Result<String, String> {
                     let offset_x = cx - crop_x;
                     let offset_y = cy - crop_y;
                     target_region = Some((offset_x, offset_y, cell_w, cell_h));
-                    parent_cell = Some((col, row, cols, rows));
+                    if let Some((col, row)) = single_cell {
+                        parent_cell = Some((col, row, cols, rows));
+                    }
                     img = platform::png::crop(&img, crop_x, crop_y, crop_r - crop_x, crop_b - crop_y)?;
                 } else {
                     // Intermediate level: exact crop

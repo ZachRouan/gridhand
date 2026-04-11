@@ -133,6 +133,7 @@ Take a plain screenshot (no grid) after clicking to confirm you hit the right el
 - **Carry position forward.** At each zoom level, ask: "where within this cell was my target?" Then pick the matching sub-cell.
 - **If you're lost, start over.** Take a fresh full grid screenshot and re-orient. Don't keep zooming into random cells.
 - **Dot notation for recursive zoom.** `B2.C1` means "cell C1 within cell B2."
+- **Between-cell targeting.** If a target straddles two cells, use `+` to zoom/click centered on the boundary: `D3+E3` (horizontal), `D3+D4` (vertical), `D3+E4` (diagonal). The sub-grid crosshairs will straddle the boundary.
 - **Zoom out by shortening the chain.** If `--cell A2.B3` was wrong, try `--cell A2.C3` (different sub-cell, same parent).
 - **Zoom is instant.** Screenshots are cached — zooming into different cells of the same parent reuses the same base image.
 

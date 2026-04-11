@@ -43,6 +43,25 @@ pub fn parse_cell_ref(s: &str) -> Result<(u32, u32), String> {
     Ok((col, row - 1))
 }
 
+/// Parse a between-cell reference like "D3+E3" into two (col, row) pairs.
+/// Validates that the two cells are adjacent (horizontally, vertically, or diagonally).
+pub fn parse_between_ref(s: &str) -> Result<((u32, u32), (u32, u32)), String> {
+    let halves: Vec<&str> = s.split('+').collect();
+    if halves.len() != 2 {
+        return Err(format!("Invalid between-cell reference '{}'. Use format like D3+E3", s));
+    }
+    let (col1, row1) = parse_cell_ref(halves[0])?;
+    let (col2, row2) = parse_cell_ref(halves[1])?;
+    let dcol = (col2 as i32 - col1 as i32).abs();
+    let drow = (row2 as i32 - row1 as i32).abs();
+    if dcol > 1 || drow > 1 || (dcol == 0 && drow == 0) {
+        return Err(format!(
+            "Cells in '{}' must be adjacent (horizontally, vertically, or diagonally)", s
+        ));
+    }
+    Ok(((col1, row1), (col2, row2)))
+}
+
 /// Compute absolute screen coordinates from a cell chain like "B2.C1".
 /// Uses f64 throughout to avoid integer division drift.
 /// Auto-scales grid density at each recursion level based on region size,
@@ -83,17 +102,30 @@ pub fn cell_to_coords(
             auto_grid(w as u32, h as u32)
         };
 
-        let (col, row) = parse_cell_ref(part)?;
-        if col >= grid_cols || row >= grid_rows {
-            return Err(format!(
-                "Cell '{}' out of range for {}x{} grid",
-                part, grid_cols, grid_rows
-            ));
-        }
         let cell_w = w / grid_cols as f64;
         let cell_h = h / grid_rows as f64;
-        x += col as f64 * cell_w;
-        y += row as f64 * cell_h;
+
+        if part.contains('+') {
+            let ((col1, row1), (col2, row2)) = parse_between_ref(part)?;
+            if col1 >= grid_cols || row1 >= grid_rows || col2 >= grid_cols || row2 >= grid_rows {
+                return Err(format!(
+                    "Cell '{}' out of range for {}x{} grid",
+                    part, grid_cols, grid_rows
+                ));
+            }
+            x += (col1 + col2) as f64 / 2.0 * cell_w;
+            y += (row1 + row2) as f64 / 2.0 * cell_h;
+        } else {
+            let (col, row) = parse_cell_ref(part)?;
+            if col >= grid_cols || row >= grid_rows {
+                return Err(format!(
+                    "Cell '{}' out of range for {}x{} grid",
+                    part, grid_cols, grid_rows
+                ));
+            }
+            x += col as f64 * cell_w;
+            y += row as f64 * cell_h;
+        }
         w = cell_w;
         h = cell_h;
     }
@@ -170,6 +202,56 @@ mod tests {
         let (x, y) = cell_to_coords("B2", 0, 0, 1280, 800, None).unwrap();
         assert_eq!(x, 240);
         assert_eq!(y, 200);
+    }
+
+    #[test]
+    fn test_parse_between_ref() {
+        let ((c1, r1), (c2, r2)) = parse_between_ref("D3+E3").unwrap();
+        assert_eq!((c1, r1), (3, 2));
+        assert_eq!((c2, r2), (4, 2));
+    }
+
+    #[test]
+    fn test_parse_between_ref_vertical() {
+        let ((c1, r1), (c2, r2)) = parse_between_ref("D3+D4").unwrap();
+        assert_eq!((c1, r1), (3, 2));
+        assert_eq!((c2, r2), (3, 3));
+    }
+
+    #[test]
+    fn test_parse_between_ref_diagonal() {
+        let ((c1, r1), (c2, r2)) = parse_between_ref("D3+E4").unwrap();
+        assert_eq!((c1, r1), (3, 2));
+        assert_eq!((c2, r2), (4, 3));
+    }
+
+    #[test]
+    fn test_parse_between_ref_non_adjacent() {
+        assert!(parse_between_ref("A1+C3").is_err());
+        assert!(parse_between_ref("A1+A1").is_err());
+    }
+
+    #[test]
+    fn test_cell_to_coords_between() {
+        // D3+E3 on 400x300 with 4x3 grid: cells are 100x100.
+        // D=col3, E=col4 — wait, 4x3 grid only has cols 0-3 (A-D).
+        // Use 8x6 grid on 800x600: cells are 100x100.
+        // D3+E3: col1=3,col2=4, row1=2,row2=2
+        // x = (3+4)/2 * 100 = 350, y = (2+2)/2 * 100 = 200
+        // center: (350+50, 200+50) = (400, 250)
+        let (x, y) = cell_to_coords("D3+E3", 0, 0, 800, 600, Some((8, 6))).unwrap();
+        assert_eq!(x, 400);
+        assert_eq!(y, 250);
+    }
+
+    #[test]
+    fn test_cell_to_coords_between_vertical() {
+        // D3+D4: col1=3,col2=3, row1=2,row2=3
+        // x = (3+3)/2 * 100 = 300, y = (2+3)/2 * 100 = 250
+        // center: (300+50, 250+50) = (350, 300)
+        let (x, y) = cell_to_coords("D3+D4", 0, 0, 800, 600, Some((8, 6))).unwrap();
+        assert_eq!(x, 350);
+        assert_eq!(y, 300);
     }
 
     #[test]
