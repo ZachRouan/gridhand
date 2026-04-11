@@ -256,9 +256,16 @@ fn cmd_screenshot(args: &[String]) -> Result<String, String> {
         let source = if use_cache { &cache_path() } else { output };
         let mut img = platform::png::read_png(source)?;
 
-        // If --cell is specified, recursively crop through dot-separated refs
+        // If --cell is specified, recursively crop through dot-separated refs.
+        // The final zoom level includes context padding (half a cell on each side)
+        // so the agent can see surrounding content for orientation.
+        let mut target_region: Option<(u32, u32, u32, u32)> = None; // (offset_x, offset_y, w, h) within padded crop
+
         if let Some(cell_chain) = &cell {
-            for (level, part) in cell_chain.split('.').enumerate() {
+            let parts: Vec<&str> = cell_chain.split('.').collect();
+            for (level, part) in parts.iter().enumerate() {
+                let is_last = level == parts.len() - 1;
+
                 // At level 0 use raw image dimensions. At deeper levels, simulate the
                 // scale-up that would have been applied to the previous crop so the grid
                 // density matches what the user saw on the zoomed screenshot.
@@ -282,22 +289,55 @@ fn cmd_screenshot(args: &[String]) -> Result<String, String> {
                 let cell_h = img.height / rows;
                 let cx = col * cell_w;
                 let cy = row * cell_h;
-                img = platform::png::crop(&img, cx, cy, cell_w, cell_h)?;
+
+                if is_last {
+                    // Final level: crop with context padding (half cell on each side)
+                    let pad_x = cell_w / 2;
+                    let pad_y = cell_h / 2;
+                    let crop_x = cx.saturating_sub(pad_x);
+                    let crop_y = cy.saturating_sub(pad_y);
+                    let crop_r = (cx + cell_w + pad_x).min(img.width);
+                    let crop_b = (cy + cell_h + pad_y).min(img.height);
+                    let offset_x = cx - crop_x;
+                    let offset_y = cy - crop_y;
+                    target_region = Some((offset_x, offset_y, cell_w, cell_h));
+                    img = platform::png::crop(&img, crop_x, crop_y, crop_r - crop_x, crop_b - crop_y)?;
+                } else {
+                    // Intermediate level: exact crop
+                    img = platform::png::crop(&img, cx, cy, cell_w, cell_h)?;
+                }
             }
         }
 
-        // Scale up small crops so content is readable in vision models
-        if cell.is_some() {
-            img = platform::png::scale_up(&img, ZOOM_MIN_WIDTH, ZOOM_MIN_HEIGHT);
-        }
+        // Scale up and draw grid overlay
+        let (final_cols, final_rows) = if let Some((ox, oy, tw, th)) = target_region {
+            // Scale based on target cell dimensions so it stays readable
+            let sx = if tw > 0 && tw < ZOOM_MIN_WIDTH { ZOOM_MIN_WIDTH.div_ceil(tw) } else { 1 };
+            let sy = if th > 0 && th < ZOOM_MIN_HEIGHT { ZOOM_MIN_HEIGHT.div_ceil(th) } else { 1 };
+            let s = sx.max(sy).max(1);
+            img = platform::png::scale_up(&img, img.width * s, img.height * s);
+            let (sox, soy, stw, sth) = (ox * s, oy * s, tw * s, th * s);
 
-        // Draw grid overlay on the final (possibly cropped and scaled) image
-        let (final_cols, final_rows) = grid.unwrap_or_else(|| grid::auto_grid(img.width, img.height));
-        platform::png::draw_grid(&mut img, final_cols, final_rows);
+            // Dim context area outside the target cell
+            platform::png::dim_outside(&mut img, sox, soy, stw, sth);
+
+            // Draw grid only within the target cell region
+            let gr = grid.unwrap_or_else(|| grid::auto_grid(stw, sth));
+            platform::png::draw_grid_in_region(&mut img, gr.0, gr.1, sox, soy, stw, sth);
+            gr
+        } else if cell.is_some() {
+            img = platform::png::scale_up(&img, ZOOM_MIN_WIDTH, ZOOM_MIN_HEIGHT);
+            let gr = grid.unwrap_or_else(|| grid::auto_grid(img.width, img.height));
+            platform::png::draw_grid(&mut img, gr.0, gr.1);
+            gr
+        } else {
+            let gr = grid.unwrap_or_else(|| grid::auto_grid(img.width, img.height));
+            platform::png::draw_grid(&mut img, gr.0, gr.1);
+            gr
+        };
 
         platform::png::write_png(output, &img)?;
 
-        // Build clean JSON output with grid info
         let grid_info = format!("{}x{}", final_cols, final_rows);
         return Ok(json::success_with(vec![
             ("path", json::JsonValue::Str(output)),

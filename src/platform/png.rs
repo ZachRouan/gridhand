@@ -966,6 +966,73 @@ fn get_glyph(c: char) -> Option<&'static [u8; 8]> {
 
 /// Draw a labeled grid overlay on an image.
 /// Columns are labeled A, B, C...; rows are labeled 1, 2, 3...
+/// Dim all pixels outside a given rectangle by reducing RGB to 1/3 brightness.
+/// Used to darken context padding around a zoomed target cell.
+pub fn dim_outside(img: &mut Image, rx: u32, ry: u32, rw: u32, rh: u32) {
+    let bpp = img.bpp as usize;
+    for y in 0..img.height {
+        for x in 0..img.width {
+            if x >= rx && x < rx + rw && y >= ry && y < ry + rh {
+                continue; // inside target region — skip
+            }
+            let idx = (y * img.width * img.bpp + x * img.bpp) as usize;
+            if idx + bpp <= img.pixels.len() {
+                img.pixels[idx] /= 3;
+                img.pixels[idx + 1] /= 3;
+                img.pixels[idx + 2] /= 3;
+            }
+        }
+    }
+}
+
+/// Draw grid overlay within a sub-region of the image.
+/// Grid lines, labels, and crosshairs are confined to (rx, ry, rw, rh).
+#[allow(dead_code)]
+pub fn draw_grid_in_region(img: &mut Image, cols: u32, rows: u32, rx: u32, ry: u32, rw: u32, rh: u32) {
+    let cell_w = rw / cols;
+    let cell_h = rh / rows;
+
+    let min_cell = cell_w.min(cell_h);
+    let scale = if min_cell >= 60 { 2u32 } else { 1u32 };
+    let pad = if scale == 2 { 5u32 } else { 2u32 };
+
+    // Vertical grid lines within region
+    for col in 1..cols {
+        let x = rx + col * cell_w;
+        draw_vertical_line(img, x, ry, ry + rh);
+    }
+
+    // Horizontal grid lines within region
+    for row in 1..rows {
+        let y = ry + row * cell_h;
+        draw_horizontal_line(img, rx, rx + rw, y);
+    }
+
+    // Labels and crosshairs within region
+    for row in 0..rows {
+        for col in 0..cols {
+            let label_col = (b'A' + col as u8) as char;
+            let label_row_char = (b'1' + row as u8) as char;
+
+            let lx = rx + col * cell_w + pad;
+            let ly = ry + row * cell_h + pad;
+
+            let bg_w = GLYPH_WIDTH * scale * 2 + pad * 2;
+            let bg_h = GLYPH_HEIGHT * scale + pad;
+            draw_filled_rect(img, lx, ly, bg_w, bg_h, [0, 0, 0, 200]);
+
+            draw_char_scaled(img, label_col, lx + pad, ly + pad / 2, scale);
+            draw_char_scaled(img, label_row_char, lx + pad + GLYPH_WIDTH * scale + 1, ly + pad / 2, scale);
+
+            let cx = rx + col * cell_w + cell_w / 2;
+            let cy = ry + row * cell_h + cell_h / 2;
+            let arm = (min_cell * 15 / 100).max(4);
+            let thickness = (min_cell * 3 / 100).max(1);
+            draw_crosshair(img, cx, cy, arm, thickness);
+        }
+    }
+}
+
 /// Label scale adapts to cell size: 2x for large cells, 1x for small cells.
 #[allow(dead_code)]
 pub fn draw_grid(img: &mut Image, cols: u32, rows: u32) {
