@@ -1,12 +1,21 @@
 use crate::{ZOOM_MIN_WIDTH, ZOOM_MIN_HEIGHT};
 
-/// Auto-select grid density based on image dimensions.
-/// Larger images get denser grids; smaller (zoomed) images get coarser grids.
-/// Grid cells target ~40px minimum to keep labels readable while maximizing precision.
-/// Caps at 16 columns (A-P) and 9 rows (1-9) for a full-screen 1920x1080 display.
+/// Auto-select grid density for the initial (full) screenshot.
+/// Dense grid for maximum first-pass precision.
+/// Caps at 16 columns (A-P) and 9 rows (1-9).
 pub fn auto_grid(width: u32, height: u32) -> (u32, u32) {
     let max_cols = (width / 40).clamp(3, 16);
     let max_rows = (height / 40).clamp(3, 9);
+    (max_cols, max_rows)
+}
+
+/// Auto-select grid density for zoomed sub-grids.
+/// Coarser than the initial grid — zoomed views need fewer, larger cells
+/// since the agent is already narrowed to a small region.
+/// Caps at 8 columns and 6 rows.
+pub fn auto_grid_zoom(width: u32, height: u32) -> (u32, u32) {
+    let max_cols = (width / 40).clamp(3, 8);
+    let max_rows = (height / 40).clamp(3, 6);
     (max_cols, max_rows)
 }
 
@@ -98,7 +107,7 @@ pub fn cell_to_coords(
             } else {
                 (w as u32, h as u32)
             };
-            auto_grid(scaled_w.0, scaled_w.1)
+            auto_grid_zoom(scaled_w.0, scaled_w.1)
         } else {
             auto_grid(w as u32, h as u32)
         };
@@ -263,12 +272,12 @@ mod tests {
     #[test]
     fn test_cell_to_coords_recursive_auto_grid_uses_scaled_density() {
         // A1 on 1280x800 (auto 16x9) → 80x88 region.
-        // At level 1, scaled up 8x to 640x704 → auto (16, 9).
-        // C1 in that 16x9 sub-grid → center at (12, 4).
-        // Without scale-up simulation, auto_grid(80,88) = (3,3),
+        // At level 1, scaled up 8x to 640x704 → auto_grid_zoom (8, 6).
+        // C1 in that 8x6 sub-grid → center at (25, 7).
+        // Without scale-up simulation, auto_grid_zoom(80,88) = (3,3),
         // and C1 would target (66, 14) — the wrong spot.
         let (x, y) = cell_to_coords("A1.C1", 0, 0, 1280, 800, None).unwrap();
-        assert_eq!(x, 12);
-        assert_eq!(y, 4);
+        assert_eq!(x, 25);
+        assert_eq!(y, 7);
     }
 }

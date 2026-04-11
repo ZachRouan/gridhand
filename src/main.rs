@@ -278,7 +278,9 @@ fn cmd_screenshot(args: &[String]) -> Result<String, String> {
                     let sx = if img.width > 0 { ZOOM_MIN_WIDTH.div_ceil(img.width) } else { 1 };
                     let sy = if img.height > 0 { ZOOM_MIN_HEIGHT.div_ceil(img.height) } else { 1 };
                     let scale = sx.max(sy).max(1);
-                    grid::auto_grid(img.width * scale, img.height * scale)
+                    grid::auto_grid_zoom(img.width * scale, img.height * scale)
+                } else if level > 0 {
+                    grid::auto_grid_zoom(img.width, img.height)
                 } else {
                     grid::auto_grid(img.width, img.height)
                 };
@@ -303,9 +305,9 @@ fn cmd_screenshot(args: &[String]) -> Result<String, String> {
                 };
 
                 if is_last {
-                    // Final level: crop with context padding (half cell on each side)
-                    let pad_x = cell_w / 2;
-                    let pad_y = cell_h / 2;
+                    // Final level: crop with context padding (full cell on each side)
+                    let pad_x = cell_w;
+                    let pad_y = cell_h;
                     let crop_x = cx.saturating_sub(pad_x);
                     let crop_y = cy.saturating_sub(pad_y);
                     let crop_r = (cx + cell_w + pad_x).min(img.width);
@@ -341,8 +343,8 @@ fn cmd_screenshot(args: &[String]) -> Result<String, String> {
                 platform::png::draw_context_grid(&mut img, sox, soy, stw, sth, pcol, prow, pcols, prows);
             }
 
-            // Draw sub-grid within the target cell region
-            let gr = grid.unwrap_or_else(|| grid::auto_grid(stw, sth));
+            // Draw sub-grid within the target cell region (coarser than initial grid)
+            let gr = grid.unwrap_or_else(|| grid::auto_grid_zoom(stw, sth));
             platform::png::draw_grid_in_region(&mut img, gr.0, gr.1, sox, soy, stw, sth);
             gr
         } else if cell.is_some() {
