@@ -171,4 +171,17 @@ mod tests {
         assert_eq!(x, 240);
         assert_eq!(y, 200);
     }
+
+    #[test]
+    fn test_cell_to_coords_recursive_auto_grid_uses_scaled_density() {
+        // A1 on 1280x800 (auto 8x6) → 160x133 region.
+        // At level 1, this region is conceptually scaled up to 640x532 (4x)
+        // to match the grid drawn on zoomed screenshots, giving auto 8x6.
+        // C1 in that 8x6 sub-grid → center at (50, 11).
+        // Without the scale-up simulation, auto_grid(160,133) = (4,3),
+        // and C1 would target (100, 22) — the wrong spot.
+        let (x, y) = cell_to_coords("A1.C1", 0, 0, 1280, 800, None).unwrap();
+        assert_eq!(x, 50);
+        assert_eq!(y, 11);
+    }
 }

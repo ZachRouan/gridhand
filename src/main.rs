@@ -262,9 +262,22 @@ fn cmd_screenshot(args: &[String]) -> Result<String, String> {
 
         // If --cell is specified, recursively crop through dot-separated refs
         if let Some(cell_chain) = &cell {
-            for part in cell_chain.split('.') {
-                // Auto-scale or use explicit grid for this level
-                let (cols, rows) = grid.unwrap_or_else(|| grid::auto_grid(img.width, img.height));
+            for (level, part) in cell_chain.split('.').enumerate() {
+                // At level 0 use raw image dimensions. At deeper levels, simulate the
+                // scale-up that would have been applied to the previous crop so the grid
+                // density matches what the user saw on the zoomed screenshot.
+                let (cols, rows) = if let Some(g) = grid {
+                    g
+                } else if level > 0
+                    && (img.width < ZOOM_MIN_WIDTH || img.height < ZOOM_MIN_HEIGHT)
+                {
+                    let sx = if img.width > 0 { ZOOM_MIN_WIDTH.div_ceil(img.width) } else { 1 };
+                    let sy = if img.height > 0 { ZOOM_MIN_HEIGHT.div_ceil(img.height) } else { 1 };
+                    let scale = sx.max(sy).max(1);
+                    grid::auto_grid(img.width * scale, img.height * scale)
+                } else {
+                    grid::auto_grid(img.width, img.height)
+                };
                 let (col, row) = grid::parse_cell_ref(part)?;
                 if col >= cols || row >= rows {
                     return Err(format!("Cell '{}' out of range for {}x{} grid", part, cols, rows));
