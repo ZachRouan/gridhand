@@ -1012,8 +1012,10 @@ pub fn draw_grid(img: &mut Image, cols: u32, rows: u32) {
             // Draw crosshair at cell center showing where a click would land
             let cx = col * cell_w + cell_w / 2;
             let cy = row * cell_h + cell_h / 2;
-            let arm = if min_cell >= 60 { 6u32 } else { 3u32 };
-            draw_crosshair(img, cx, cy, arm);
+            // Scale arm to ~15% of cell size, thickness to ~3% (minimum 1px)
+            let arm = (min_cell * 15 / 100).max(4);
+            let thickness = (min_cell * 3 / 100).max(1);
+            draw_crosshair(img, cx, cy, arm, thickness);
         }
     }
 }
@@ -1063,34 +1065,56 @@ fn draw_filled_rect(img: &mut Image, x: u32, y: u32, w: u32, h: u32, color: [u8;
     }
 }
 
-/// Draw a small crosshair (+) at (cx, cy) with the given arm length.
-/// Red with a 1px black outline for visibility on any background.
-fn draw_crosshair(img: &mut Image, cx: u32, cy: u32, arm: u32) {
+/// Draw a crosshair (+) at (cx, cy) with the given arm length and line thickness.
+/// Red with a black outline for visibility on any background.
+fn draw_crosshair(img: &mut Image, cx: u32, cy: u32, arm: u32, thickness: u32) {
     let red: [u8; 4] = [255, 40, 40, 255];
     let outline: [u8; 4] = [0, 0, 0, 200];
+    let half_t = thickness as i32 / 2;
+    let outline_pad: i32 = 1;
 
-    // Horizontal arm with outline
+    // Horizontal arm
     for dx_i in -(arm as i32)..=(arm as i32) {
         let px = cx as i32 + dx_i;
-        if px >= 0 && (px as u32) < img.width {
-            let px = px as u32;
-            // Black outline above and below
-            if cy > 0 { set_pixel(img, px, cy - 1, outline); }
-            if cy + 1 < img.height { set_pixel(img, px, cy + 1, outline); }
-            // Red center
-            set_pixel(img, px, cy, red);
+        if px < 0 || px as u32 >= img.width { continue; }
+        let px = px as u32;
+        // Black outline (one pixel outside the thickness band)
+        for dt in -half_t - outline_pad..=half_t + outline_pad {
+            let py = cy as i32 + dt;
+            if py >= 0 && (py as u32) < img.height
+                && (dt < -half_t || dt > half_t)
+            {
+                set_pixel(img, px, py as u32, outline);
+            }
+        }
+        // Red fill
+        for dt in -half_t..=half_t {
+            let py = cy as i32 + dt;
+            if py >= 0 && (py as u32) < img.height {
+                set_pixel(img, px, py as u32, red);
+            }
         }
     }
-    // Vertical arm with outline
+    // Vertical arm
     for dy_i in -(arm as i32)..=(arm as i32) {
         let py = cy as i32 + dy_i;
-        if py >= 0 && (py as u32) < img.height {
-            let py = py as u32;
-            // Black outline left and right
-            if cx > 0 { set_pixel(img, cx - 1, py, outline); }
-            if cx + 1 < img.width { set_pixel(img, cx + 1, py, outline); }
-            // Red center
-            set_pixel(img, cx, py, red);
+        if py < 0 || py as u32 >= img.height { continue; }
+        let py = py as u32;
+        // Black outline
+        for dt in -half_t - outline_pad..=half_t + outline_pad {
+            let qx = cx as i32 + dt;
+            if qx >= 0 && (qx as u32) < img.width
+                && (dt < -half_t || dt > half_t)
+            {
+                set_pixel(img, qx as u32, py, outline);
+            }
+        }
+        // Red fill
+        for dt in -half_t..=half_t {
+            let qx = cx as i32 + dt;
+            if qx >= 0 && (qx as u32) < img.width {
+                set_pixel(img, qx as u32, py, red);
+            }
         }
     }
 }
