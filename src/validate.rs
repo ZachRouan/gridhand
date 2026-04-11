@@ -16,20 +16,6 @@ pub fn output_path(path: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Validate mouse coordinates are within reasonable screen bounds.
-pub fn coordinates(x: i32, y: i32) -> Result<(), String> {
-    // Allow negative coords for multi-monitor but reject absurd values
-    const MAX_COORD: i32 = 32768;
-    const MIN_COORD: i32 = -32768;
-    if !(MIN_COORD..=MAX_COORD).contains(&x) {
-        return Err(format!("X coordinate {} is out of range ({} to {})", x, MIN_COORD, MAX_COORD));
-    }
-    if !(MIN_COORD..=MAX_COORD).contains(&y) {
-        return Err(format!("Y coordinate {} is out of range ({} to {})", y, MIN_COORD, MAX_COORD));
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -60,18 +46,5 @@ mod tests {
     #[test]
     fn test_output_path_empty() {
         assert!(output_path("").is_err());
-    }
-
-    #[test]
-    fn test_valid_coordinates() {
-        assert!(coordinates(0, 0).is_ok());
-        assert!(coordinates(1920, 1080).is_ok());
-        assert!(coordinates(-500, 200).is_ok());
-    }
-
-    #[test]
-    fn test_coordinates_out_of_range() {
-        assert!(coordinates(100000, 0).is_err());
-        assert!(coordinates(0, -100000).is_err());
     }
 }

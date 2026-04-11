@@ -48,8 +48,6 @@ COMMANDS:
     windows list                    List all open windows
     windows raise <id>              Raise a window by ID
 
-    mouse move <x> <y>              Move mouse to absolute screen coordinates
-
     mouse click [options]           Click at current position
         --cell <ref>                Click at grid cell center (requires --window-id)
         --grid WxH                  Grid dimensions for cell targeting
@@ -331,7 +329,7 @@ fn cmd_windows(args: &[String]) -> Result<String, String> {
 
 fn cmd_mouse(args: &[String]) -> Result<String, String> {
     if args.is_empty() {
-        return Err("Usage: gui-tool mouse <move|click> [args...]".to_string());
+        return Err("Usage: gui-tool mouse click [--cell <ref>] [--window-id <id>] [--button left|right]".to_string());
     }
 
     let subcmd = args[0].as_str();
@@ -373,17 +371,6 @@ fn cmd_mouse(args: &[String]) -> Result<String, String> {
     }
 
     match subcmd {
-        "move" => {
-            // Absolute screen coordinates only
-            let x: i32 = positional.first()
-                .ok_or("Usage: gui-tool mouse move <x> <y>")?
-                .parse().map_err(|_| "Invalid x coordinate")?;
-            let y: i32 = positional.get(1)
-                .ok_or("Usage: gui-tool mouse move <x> <y>")?
-                .parse().map_err(|_| "Invalid y coordinate")?;
-            validate::coordinates(x, y)?;
-            platform::mouse_move(x, y)
-        }
         "click" => {
             if let Some(cell_ref) = &cell {
                 // Cell-based click — move to cell center and click in one operation
