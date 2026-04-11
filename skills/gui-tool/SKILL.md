@@ -1,6 +1,6 @@
 ---
 name: gui-tool
-description: Interact with the desktop GUI — take screenshots, list/raise windows, move/click mouse, type text, press key combos. Use when you need to see the screen, find windows, click on things, type into applications, or automate any GUI interaction. All commands return JSON.
+description: Interact with the desktop GUI — take screenshots, list/raise windows, click with grid targeting, type text, press key combos. Use when you need to see the screen, find windows, click on things, type into applications, or automate any GUI interaction. All commands return JSON.
 ---
 
 # gui-tool
@@ -17,6 +17,12 @@ gui-tool screenshot --output /tmp/screenshot.png
 
 # Screenshot with a specific window raised first
 gui-tool screenshot --window "Firefox" --output /tmp/firefox.png
+
+# Screenshot with grid overlay for targeting
+gui-tool screenshot --window-id 123 --grid --output /tmp/grid.png
+
+# Zoom into a grid cell
+gui-tool screenshot --window-id 123 --grid --cell B2 --output /tmp/zoom.png
 ```
 
 Returns: `{"status":"success","path":"/tmp/screenshot.png"}`
@@ -39,18 +45,16 @@ gui-tool windows raise 1234567
 ### Mouse
 
 ```bash
-# Move mouse to absolute screen coordinates
-gui-tool mouse move 500 300
-
-# Move mouse relative to a window's top-left corner
-gui-tool mouse move 100 200 --window-id 2045481940
-
-# Click (default: left)
+# Click at current mouse position (default: left)
 gui-tool mouse click
 gui-tool mouse click --button right
+
+# Click at a grid cell center (moves + clicks in one step)
+gui-tool mouse click --cell B2 --window-id 123
+gui-tool mouse click --cell B2.C1 --window-id 123
 ```
 
-When `--window` or `--window-id` is used with `mouse move`, coordinates are **relative to the window's top-left corner**, not the screen. This eliminates manual offset math.
+All targeting uses `--cell` with grid references. There are no pixel coordinate commands — zoom the grid until the target cell is precise enough, then click.
 
 ### Keyboard
 
@@ -80,44 +84,53 @@ Errors go to stderr as JSON:
 {"status":"error","message":"..."}
 ```
 
-## Precision Targeting (Grid Workflow)
+## Grid Targeting Workflow
 
-The grid system eliminates pixel coordinate guessing. The agent reads cell labels from images instead of computing coordinates.
+The grid system is the only way to click on things. No pixel coordinates exist. Each grid cell has a red crosshair (+) at its center showing exactly where a click would land. **Always zoom before clicking.**
 
-### Step 1: Get a grid view
+### How it works
+
+You zoom into progressively smaller regions until a crosshair lands on your target. At each level you carry forward your spatial knowledge of where the target is within the current cell.
+
+### Step 1: Orient — full grid screenshot
 ```bash
 gui-tool screenshot --window-id 123 --grid --output /tmp/grid.png
 ```
-The screenshot has a labeled 8x6 grid overlay (cells A1 through D3).
+Read the image. Identify which cell contains your target. Note the target's position **within** that cell (e.g., "the search bar is in D1, sitting in the lower-left portion of the cell"). This position is critical — you will use it at every subsequent zoom level.
 
-### Step 2: Identify the target cell
-Read the grid image. Find which cell contains your target (e.g., the button is in B2).
-
-### Step 3: Zoom if needed
-If the target is small within the cell, zoom into it:
+### Step 2: Zoom — narrow the region
 ```bash
-gui-tool screenshot --window-id 123 --grid --cell B2 --output /tmp/zoom.png
+gui-tool screenshot --window-id 123 --grid --cell D1 --output /tmp/zoom.png
 ```
-This crops to cell B2 and draws a new sub-grid. Find the sub-cell (e.g., C1).
+This crops to D1, scales it up, and draws a new sub-grid with new crosshairs.
 
-You can zoom multiple levels with dot notation:
-```bash
-gui-tool screenshot --window-id 123 --grid --cell B2.C1 --output /tmp/zoom2.png
-```
+**Pick the sub-cell using spatial reasoning.** Zoomed crops are scaled-up pixel regions. Text will be blurry or unreadable. Uniform UI areas (toolbars, headers, sidebars) will look like featureless blocks of color. This is normal — do NOT try to re-identify the target by scanning for text or icons. Instead, translate the position you noted:
+- "The search bar was in the lower-left of D1" → pick a sub-cell in the lower-left, like B5 or C5
+- "The button was in the upper-right of B3" → pick a sub-cell like G1 or H1
 
-### Step 4: Click
+If you need more precision (small buttons, icons, dense UI), zoom again:
 ```bash
-gui-tool mouse move --cell B2.C1 --window-id 123
-gui-tool mouse click --window-id 123
+gui-tool screenshot --window-id 123 --grid --cell D1.C5 --output /tmp/zoom2.png
 ```
-The tool calculates the center of cell C1 within cell B2 and moves there.
+Each zoom narrows the region further. Continue zooming until a crosshair is on your target. Carry your spatial knowledge forward at each level.
+
+### Step 3: Click
+```bash
+gui-tool mouse click --cell D1.C5.F3 --window-id 123
+```
+The tool calculates the final crosshair position through all zoom levels and clicks there.
+
+### Step 4: Verify
+Take a plain screenshot (no grid) after clicking to confirm you hit the right element. If you missed, start over from step 1 — the screen state has changed.
 
 ### Key rules
-- **No pixel math.** Cell references from grid images map directly to mouse positions.
-- **Default grid is 8x6.** Grid density auto-scales for zoomed crops — you don't need to track it.
+- **Always zoom before clicking.** The full grid is for orientation only.
+- **Spatial reasoning, not visual search.** Pick sub-cells based on where the target sat in the parent cell. Never hunt through zoomed crops looking for text.
+- **Carry position forward.** At each zoom level, ask: "where within this cell was my target?" Then pick the matching sub-cell.
+- **If you're lost, start over.** Take a fresh full grid screenshot and re-orient. Don't keep zooming into random cells.
 - **Dot notation for recursive zoom.** `B2.C1` means "cell C1 within cell B2."
-- **Zoom out by shortening the chain.** If `--cell A2.B3` was wrong, just use `--cell A2` to go back one level.
-- **Zoom is instant.** Screenshots are cached — zooming into different cells reuses the same image.
+- **Zoom out by shortening the chain.** If `--cell A2.B3` was wrong, try `--cell A2.C3` (different sub-cell, same parent).
+- **Zoom is instant.** Screenshots are cached — zooming into different cells of the same parent reuses the same base image.
 
 ## Common patterns
 
@@ -132,10 +145,9 @@ Then read the screenshot image to see the desktop.
 gui-tool screenshot --window-id 2045481940 --output /tmp/app.png
 ```
 
-**Focus and interact (no race condition):**
+**Focus, click, and type (no race condition):**
 ```bash
-gui-tool mouse move 200 150 --window-id 2045481940
-gui-tool mouse click --window-id 2045481940
+gui-tool mouse click --cell B3 --window-id 2045481940
 gui-tool key type "hello" --window-id 2045481940
 ```
 
