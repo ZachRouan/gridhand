@@ -985,6 +985,78 @@ pub fn dim_outside(img: &mut Image, rx: u32, ry: u32, rw: u32, rh: u32) {
     }
 }
 
+/// Draw parent-level grid lines and cell labels in the context (dimmed) area.
+/// This shows the agent which parent cells surround the target, so it can
+/// adjust its cell reference (e.g., switch from D3 to E3).
+pub fn draw_context_grid(
+    img: &mut Image,
+    tx: u32, ty: u32, tw: u32, th: u32,       // target cell region (scaled)
+    col: u32, row: u32, cols: u32, rows: u32,  // parent-level cell position and grid size
+) {
+    // Draw parent grid lines at the target cell edges (spanning full image)
+    // These are dimmed-style lines (thinner, lower contrast)
+    let line_color: [u8; 4] = [160, 160, 160, 200];
+
+    // Vertical lines at left and right edges of target
+    for &lx in &[tx, tx + tw] {
+        if lx > 0 && lx < img.width {
+            for y in 0..img.height {
+                // Skip the target cell interior — the sub-grid will draw there
+                if y >= ty && y < ty + th { continue; }
+                set_pixel(img, lx, y, line_color);
+                if lx + 1 < img.width { set_pixel(img, lx + 1, y, line_color); }
+            }
+        }
+    }
+    // Horizontal lines at top and bottom edges of target
+    for &ly in &[ty, ty + th] {
+        if ly > 0 && ly < img.height {
+            for x in 0..img.width {
+                if x >= tx && x < tx + tw { continue; }
+                set_pixel(img, x, ly, line_color);
+                if ly + 1 < img.height { set_pixel(img, x, ly + 1, line_color); }
+            }
+        }
+    }
+
+    // Label each visible neighbor cell in the context area.
+    // Neighbors are the 8 cells surrounding the target in the parent grid.
+    let scale = if tw.min(th) >= 240 { 2u32 } else { 1u32 };
+    let neighbors: [(i32, i32, u32, u32, u32, u32); 8] = [
+        // (dcol, drow, region_x, region_y, region_w, region_h)
+        (-1, -1, 0,      0,      tx,                    ty),                       // top-left
+        ( 0, -1, tx,     0,      tw,                    ty),                       // top
+        ( 1, -1, tx+tw,  0,      img.width.saturating_sub(tx+tw), ty),             // top-right
+        (-1,  0, 0,      ty,     tx,                    th),                       // left
+        ( 1,  0, tx+tw,  ty,     img.width.saturating_sub(tx+tw), th),             // right
+        (-1,  1, 0,      ty+th,  tx,                    img.height.saturating_sub(ty+th)), // bottom-left
+        ( 0,  1, tx,     ty+th,  tw,                    img.height.saturating_sub(ty+th)), // bottom
+        ( 1,  1, tx+tw,  ty+th,  img.width.saturating_sub(tx+tw), img.height.saturating_sub(ty+th)), // bottom-right
+    ];
+
+    for &(dcol, drow, rx, ry, rw, rh) in &neighbors {
+        let ncol = col as i32 + dcol;
+        let nrow = row as i32 + drow;
+        // Skip if neighbor is out of parent grid bounds or region is empty
+        if ncol < 0 || ncol >= cols as i32 || nrow < 0 || nrow >= rows as i32 { continue; }
+        if rw < 20 || rh < 10 { continue; }
+
+        let label_col = (b'A' + ncol as u8) as char;
+        let label_row = (b'1' + nrow as u8) as char;
+
+        // Center the label in the visible context region
+        let label_w = GLYPH_WIDTH * scale * 2 + 8;
+        let label_h = GLYPH_HEIGHT * scale + 4;
+        let lx = rx + rw.saturating_sub(label_w) / 2;
+        let ly = ry + rh.saturating_sub(label_h) / 2;
+
+        // Draw background and characters (dimmed style — semi-transparent)
+        draw_filled_rect(img, lx, ly, label_w, label_h, [0, 0, 0, 160]);
+        draw_char_scaled(img, label_col, lx + 3, ly + 2, scale);
+        draw_char_scaled(img, label_row, lx + 3 + GLYPH_WIDTH * scale + 1, ly + 2, scale);
+    }
+}
+
 /// Draw grid overlay within a sub-region of the image.
 /// Grid lines, labels, and crosshairs are confined to (rx, ry, rw, rh).
 #[allow(dead_code)]

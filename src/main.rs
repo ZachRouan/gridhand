@@ -260,6 +260,7 @@ fn cmd_screenshot(args: &[String]) -> Result<String, String> {
         // The final zoom level includes context padding (half a cell on each side)
         // so the agent can see surrounding content for orientation.
         let mut target_region: Option<(u32, u32, u32, u32)> = None; // (offset_x, offset_y, w, h) within padded crop
+        let mut parent_cell: Option<(u32, u32, u32, u32)> = None; // (col, row, cols, rows) at the final zoom level
 
         if let Some(cell_chain) = &cell {
             let parts: Vec<&str> = cell_chain.split('.').collect();
@@ -301,6 +302,7 @@ fn cmd_screenshot(args: &[String]) -> Result<String, String> {
                     let offset_x = cx - crop_x;
                     let offset_y = cy - crop_y;
                     target_region = Some((offset_x, offset_y, cell_w, cell_h));
+                    parent_cell = Some((col, row, cols, rows));
                     img = platform::png::crop(&img, crop_x, crop_y, crop_r - crop_x, crop_b - crop_y)?;
                 } else {
                     // Intermediate level: exact crop
@@ -321,7 +323,12 @@ fn cmd_screenshot(args: &[String]) -> Result<String, String> {
             // Dim context area outside the target cell
             platform::png::dim_outside(&mut img, sox, soy, stw, sth);
 
-            // Draw grid only within the target cell region
+            // Draw parent-level grid lines and labels in the context area
+            if let Some((pcol, prow, pcols, prows)) = parent_cell {
+                platform::png::draw_context_grid(&mut img, sox, soy, stw, sth, pcol, prow, pcols, prows);
+            }
+
+            // Draw sub-grid within the target cell region
             let gr = grid.unwrap_or_else(|| grid::auto_grid(stw, sth));
             platform::png::draw_grid_in_region(&mut img, gr.0, gr.1, sox, soy, stw, sth);
             gr
