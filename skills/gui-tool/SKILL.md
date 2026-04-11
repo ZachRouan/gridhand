@@ -63,6 +63,10 @@ gui-tool mouse click --cell D3+D4 --window-id 123   # vertical
 gui-tool mouse click --cell D3+E4 --window-id 123   # diagonal
 ```
 
+### Small Icons and Buttons
+
+Tiny targets (like/dislike buttons, close icons, checkboxes) need 3+ zoom levels. On the first zoom, note the icon's position carefully — at deeper zooms it becomes a few blurry pixels. Trust your spatial note, not what the zoomed crop looks like.
+
 ### Dot Notation
 
 `B2.C1` = sub-cell C1 within parent B2. Change the last segment to try a neighbor at the same depth (`B2.D2`). Append to go deeper (`B2.C1.F3`).
