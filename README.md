@@ -8,31 +8,31 @@ Built for AI desktop agents (Claude Code, Codex, Gemini CLI, etc.) but works fin
 
 ## Features
 
-- **Grid overlay for targeting:** Instead of guessing pixel coordinates, overlay a labeled grid (A1, B2, etc.) on screenshots and click by cell label. Supports recursive zoom for sub-regions (`B2.C1`).
+- **Grid targeting:** Overlay a labeled grid on screenshots with red crosshairs at each cell center. Click by cell label — no pixel coordinates. Supports recursive zoom (`B2.C1`) and between-cell targeting (`D3+E3`).
+- **Contextual zoom:** Zoomed views show the target cell with a coarser sub-grid, surrounded by dimmed context from adjacent cells with parent-level labels for spatial orientation.
 - **No dependencies:** Pure std Rust, direct FFI to OS APIs (CoreGraphics, user32.dll, D-Bus). Compiles to a single small binary.
 - **Wayland support:** Works natively on GNOME/Wayland via XDG Desktop Portals and the `window-calls` extension, where tools like `xdotool` and `pyautogui` break.
-- **JSON output:** Every command returns structured JSON, so agents don’t have to parse text output.
+- **JSON output:** Every command returns structured JSON, so agents don't have to parse text output.
 
 ## Grid Targeting
 
-The main idea: agents are bad at guessing pixel coordinates from screenshots. Instead, `gui-tool` overlays a labeled grid, and the agent references cells by label. If a cell is too coarse, zoom into it and get a finer sub-grid.
+The main idea: agents are bad at guessing pixel coordinates from screenshots. Instead, `gui-tool` overlays a labeled grid, and the agent references cells by label. The workflow is **orient → zoom → zoom → ... → click → verify**.
 
 ```bash
-# Screenshot with labeled grid overlay (default auto-scales, e.g., 8x6)
+# Screenshot with labeled grid overlay (auto-scales: 16x9 for full screen)
 gui-tool screenshot --window-id 123 --grid --output /tmp/grid.png
 
-# Custom grid density
-gui-tool screenshot --window-id 123 --grid 6x4 --output /tmp/grid.png
-
-# Zoom into a cell with sub-grid
+# Zoom into a cell — shows sub-grid with dimmed context from neighbors
 gui-tool screenshot --window-id 123 --grid --cell B2 --output /tmp/zoom.png
 
-# Move to a cell (calculates center automatically)
-gui-tool mouse move --cell B2 --window-id 123
+# Recursive zoom for precision
+gui-tool screenshot --window-id 123 --grid --cell B2.C1 --output /tmp/zoom2.png
 
-# Recursive: target cell C1 within cell B2
-gui-tool mouse move --cell B2.C1 --window-id 123
-gui-tool mouse click --window-id 123
+# Click at a cell center (moves + clicks in one step)
+gui-tool mouse click --cell B2.C1 --window-id 123
+
+# Target straddles two cells? Zoom/click centered on the boundary
+gui-tool mouse click --cell D3+E3 --window-id 123
 ```
 
 ## Commands
@@ -63,21 +63,18 @@ gui-tool windows raise 1234567890
 ### Mouse
 
 ```bash
-# Move to absolute screen coordinates
-gui-tool mouse move 500 300
-
-# Move relative to a window's top-left corner
-gui-tool mouse move 100 200 --window-id 2045481940
-
-# Click
+# Click at current position
 gui-tool mouse click
 gui-tool mouse click --button right
 
-# Focus a window first, then click
-gui-tool mouse click --window "Firefox"
+# Click at a grid cell center (moves + clicks in one step)
+gui-tool mouse click --cell B2 --window-id 2045481940
+
+# Between-cell click (centered on boundary)
+gui-tool mouse click --cell D3+E3 --window-id 2045481940
 ```
 
-*When `--window` or `--window-id` is used with `mouse move`, coordinates are relative to the window — pixel positions from a cropped screenshot map directly to mouse coordinates.*
+All targeting uses `--cell` with grid references. There are no pixel coordinate commands — zoom the grid until a crosshair is on the target, then click.
 
 ### Keyboard
 
