@@ -38,7 +38,7 @@ No pixel coordinates exist. The grid is the only way to click. Each cell has a r
 
 **Click.** `gui-tool mouse click --cell D1.C5 --window-id 123`
 
-**Verify.** Take a plain screenshot (no grid) to confirm. If wrong, re-orient from scratch — the screen state changed.
+**Verify.** Zoom into the area you just clicked to check the result — a full-page screenshot is too small to see subtle state changes (button color, focus ring, selection highlight). If the click missed, re-orient from scratch — the screen state may have changed.
 
 ### Navigating Without Zooming Out
 

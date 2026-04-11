@@ -112,8 +112,12 @@ pub fn cell_to_coords(
             auto_grid(w as u32, h as u32)
         };
 
-        let cell_w = w / grid_cols as f64;
-        let cell_h = h / grid_rows as f64;
+        // Use integer-truncated cell dimensions to match the screenshot crop loop,
+        // which uses u32 division. Float division would drift 1-3px per zoom level.
+        let cell_w_int = (w as u32) / grid_cols;
+        let cell_h_int = (h as u32) / grid_rows;
+        let cell_w = cell_w_int as f64;
+        let cell_h = cell_h_int as f64;
 
         if part.contains('+') {
             let ((col1, row1), (col2, row2)) = parse_between_ref(part)?;
@@ -212,11 +216,11 @@ mod tests {
 
     #[test]
     fn test_cell_to_coords_auto_grid() {
-        // 1280x800 → auto_grid = (16, 9), cell = 80x88.8
-        // B2 = col 1, row 1 → center at (120, 133)
+        // 1280x800 → auto_grid = (16, 9), cell = 80x88 (truncated)
+        // B2 = col 1, row 1 → center at (120, 132)
         let (x, y) = cell_to_coords("B2", 0, 0, 1280, 800, None).unwrap();
         assert_eq!(x, 120);
-        assert_eq!(y, 133);
+        assert_eq!(y, 132);
     }
 
     #[test]
