@@ -1098,8 +1098,8 @@ pub fn draw_grid_in_region(img: &mut Image, cols: u32, rows: u32, rx: u32, ry: u
 
             let cx = rx + col * cell_w + cell_w / 2;
             let cy = ry + row * cell_h + cell_h / 2;
-            let arm = (min_cell * 15 / 100).max(4);
-            let thickness = (min_cell * 3 / 100).max(1);
+            let arm = (min_cell * 10 / 100).max(3);
+            let thickness = (min_cell * 2 / 100).max(1);
             draw_crosshair(img, cx, cy, arm, thickness);
         }
     }
@@ -1152,8 +1152,8 @@ pub fn draw_grid(img: &mut Image, cols: u32, rows: u32) {
             let cx = col * cell_w + cell_w / 2;
             let cy = row * cell_h + cell_h / 2;
             // Scale arm to ~15% of cell size, thickness to ~3% (minimum 1px)
-            let arm = (min_cell * 15 / 100).max(4);
-            let thickness = (min_cell * 3 / 100).max(1);
+            let arm = (min_cell * 10 / 100).max(3);
+            let thickness = (min_cell * 2 / 100).max(1);
             draw_crosshair(img, cx, cy, arm, thickness);
         }
     }
