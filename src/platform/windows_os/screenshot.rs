@@ -3,14 +3,17 @@ use super::ffi::*;
 use super::windows;
 
 pub fn screenshot_full(output: &str) -> Result<String, String> {
-    let width = unsafe { GetSystemMetrics(SM_CXSCREEN) };
-    let height = unsafe { GetSystemMetrics(SM_CYSCREEN) };
+    // Capture the virtual screen (all monitors), not just the primary
+    let x = unsafe { GetSystemMetrics(SM_XVIRTUALSCREEN) };
+    let y = unsafe { GetSystemMetrics(SM_YVIRTUALSCREEN) };
+    let width = unsafe { GetSystemMetrics(SM_CXVIRTUALSCREEN) };
+    let height = unsafe { GetSystemMetrics(SM_CYVIRTUALSCREEN) };
 
     if width <= 0 || height <= 0 {
         return Err("Failed to get screen dimensions".to_string());
     }
 
-    let img = capture_region(0, 0, width, height)?;
+    let img = capture_region(x, y, width, height)?;
     crate::platform::png::write_png(output, &img)?;
 
     Ok(json::success_with(vec![

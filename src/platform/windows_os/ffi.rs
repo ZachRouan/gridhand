@@ -77,6 +77,7 @@ pub const MOUSEEVENTF_LEFTDOWN: u32 = 0x0002;
 pub const MOUSEEVENTF_LEFTUP: u32 = 0x0004;
 pub const MOUSEEVENTF_RIGHTDOWN: u32 = 0x0008;
 pub const MOUSEEVENTF_RIGHTUP: u32 = 0x0010;
+pub const MOUSEEVENTF_VIRTUALDESK: u32 = 0x4000;
 pub const MOUSEEVENTF_ABSOLUTE: u32 = 0x8000;
 
 // --- Keyboard event flags ---
@@ -121,6 +122,10 @@ pub const VK_F12: u16 = 0x7B;
 
 pub const SM_CXSCREEN: i32 = 0;
 pub const SM_CYSCREEN: i32 = 1;
+pub const SM_XVIRTUALSCREEN: i32 = 76;
+pub const SM_YVIRTUALSCREEN: i32 = 77;
+pub const SM_CXVIRTUALSCREEN: i32 = 78;
+pub const SM_CYVIRTUALSCREEN: i32 = 79;
 
 // --- ShowWindow commands ---
 
@@ -187,6 +192,8 @@ unsafe extern "system" {
     pub fn GetWindowThreadProcessId(hWnd: HWND, lpdwProcessId: *mut u32) -> u32;
     pub fn SetForegroundWindow(hWnd: HWND) -> BOOL;
     pub fn ShowWindow(hWnd: HWND, nCmdShow: i32) -> BOOL;
+    pub fn IsIconic(hWnd: HWND) -> BOOL;
+    pub fn SetProcessDPIAware() -> BOOL;
 }
 
 // --- gdi32.dll ---

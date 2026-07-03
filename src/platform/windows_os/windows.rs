@@ -36,7 +36,12 @@ pub fn raise_window(id: u64) -> Result<String, String> {
     }
 
     unsafe {
-        ShowWindow(hwnd, SW_RESTORE);
+        // Only restore when minimized: SW_RESTORE on a *maximized* window
+        // pops it back to windowed mode, silently changing its geometry
+        // between the screenshot and subsequent clicks.
+        if IsIconic(hwnd) != 0 {
+            ShowWindow(hwnd, SW_RESTORE);
+        }
         let result = SetForegroundWindow(hwnd);
         if result == 0 {
             return Err(format!("Failed to set foreground window (id={})", id));

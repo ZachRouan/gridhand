@@ -34,14 +34,25 @@ pub fn raise_window(id: u64) -> Result<String, String> {
         let sel = sel_registerName(b"activateWithOptions:\0".as_ptr());
         let msg_send: extern "C" fn(*mut c_void, *mut c_void, u64) -> bool =
             std::mem::transmute(objc_msgSend as *const c_void);
-        msg_send(app, sel, NSApplicationActivateIgnoringOtherApps);
-
-        // Raise the specific window (not just the app) using CGSOrderWindow
-        let conn = CGSMainConnectionID();
-        CGSOrderWindow(conn, id as i32, 1, 0); // 1 = above, 0 = above all
+        let activated = msg_send(app, sel, NSApplicationActivateIgnoringOtherApps);
+        if !activated {
+            // macOS 14+ cooperative activation can refuse a background
+            // process's request; reporting success for a raise that did not
+            // happen would poison every follow-up screenshot and click.
+            return Err(format!(
+                "macOS refused activation of PID {} (cooperative activation)", pid
+            ));
+        }
     }
 
-    Ok(json::success())
+    // Note: this activates the owning application, which brings its window
+    // stack forward — macOS offers no public cross-process API to order one
+    // specific window by CGWindowID (CGSOrderWindow is private SPI and is
+    // rejected for windows of other processes). For multi-window apps the
+    // app's frontmost window comes forward, which may not be `id`.
+    Ok(json::success_with(vec![
+        ("scope", JsonValue::Str("application")),
+    ]))
 }
 
 /// Find a window by title substring. Returns (window_number, bounds_json).

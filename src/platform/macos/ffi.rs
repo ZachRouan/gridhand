@@ -137,8 +137,6 @@ unsafe extern "C" {
     pub fn CGRectMakeWithDictionaryRepresentation(dict: *const c_void, rect: *mut CGRect) -> bool;
 
     // Private CG SPI for raising a specific window by ID (stable since macOS 10.6)
-    pub fn CGSMainConnectionID() -> i32;
-    pub fn CGSOrderWindow(cid: i32, wid: i32, place: i32, relativeToWindow: i32) -> i32;
 }
 
 // --- CoreFoundation FFI ---

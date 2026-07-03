@@ -1,18 +1,26 @@
 use super::ffi::*;
 
 pub fn mouse_move(x: i32, y: i32) -> Result<String, String> {
-    let screen_w = unsafe { GetSystemMetrics(SM_CXSCREEN) };
-    let screen_h = unsafe { GetSystemMetrics(SM_CYSCREEN) };
+    // Normalize over the virtual desktop (all monitors). MOUSEEVENTF_ABSOLUTE
+    // alone maps 0..65535 onto the primary monitor only, which makes
+    // secondary monitors unreachable and negative coordinates inexpressible.
+    let vx = unsafe { GetSystemMetrics(SM_XVIRTUALSCREEN) };
+    let vy = unsafe { GetSystemMetrics(SM_YVIRTUALSCREEN) };
+    let vw = unsafe { GetSystemMetrics(SM_CXVIRTUALSCREEN) };
+    let vh = unsafe { GetSystemMetrics(SM_CYVIRTUALSCREEN) };
 
-    if screen_w <= 0 || screen_h <= 0 {
-        return Err("Failed to get screen dimensions".to_string());
+    if vw <= 1 || vh <= 1 {
+        return Err("Failed to get virtual screen dimensions".to_string());
     }
 
-    // Normalize to 0-65535 range for MOUSEEVENTF_ABSOLUTE
-    let norm_x = (x as i64 * 65535 / screen_w as i64) as i32;
-    let norm_y = (y as i64 * 65535 / screen_h as i64) as i32;
+    // Round like MulDiv(dx, 65535, span): plain truncation lands up to 1px
+    // short at the right/bottom edges (scrollbars live there)
+    let span_x = (vw - 1) as i64;
+    let span_y = (vh - 1) as i64;
+    let norm_x = (((x - vx) as i64 * 65535 + span_x / 2) / span_x) as i32;
+    let norm_y = (((y - vy) as i64 * 65535 + span_y / 2) / span_y) as i32;
 
-    let input = mouse_input(norm_x, norm_y, MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE);
+    let input = mouse_input(norm_x, norm_y, MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK);
     let sent = unsafe { SendInput(1, &input, input_size()) };
     if sent != 1 {
         return Err("Failed to send mouse move event".to_string());
