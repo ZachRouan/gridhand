@@ -14,10 +14,22 @@ pub fn screenshot_full(output: &str) -> Result<String, String> {
     let src_path = uri_to_path(&uri)?;
     std::fs::copy(&src_path, output)
         .map_err(|e| format!("Failed to copy screenshot to {}: {}", output, e))?;
+    // The portal saved its own copy (typically in ~/Pictures/Screenshots);
+    // remove it so repeated captures don't litter the user's files.
+    let _ = std::fs::remove_file(&src_path);
 
     Ok(json::success_with(vec![
         ("path", JsonValue::Str(output)),
     ]))
+}
+
+/// Crop rectangle for a window that may hang off the screen edges: clamp the
+/// origin to 0 and shrink the size by the off-screen amount, so the crop
+/// contains only the window (not content shifted in from neighbors).
+fn visible_crop(x: i64, y: i64, w: i64, h: i64) -> (u32, u32, u32, u32) {
+    let crop_w = (w + x.min(0)).max(0) as u32;
+    let crop_h = (h + y.min(0)).max(0) as u32;
+    (x.max(0) as u32, y.max(0) as u32, crop_w, crop_h)
 }
 
 pub fn screenshot_window(title: &str, output: &str) -> Result<String, String> {
@@ -55,9 +67,11 @@ pub fn screenshot_window(title: &str, output: &str) -> Result<String, String> {
     let uri = take_portal_screenshot(&mut conn)?;
     let src_path = uri_to_path(&uri)?;
 
-    // Read, crop, and write the PNG (clamp negative coords to 0)
+    // Read, crop to the visible part of the window, and write the PNG
     let full_img = crate::platform::png::read_png(&src_path)?;
-    let cropped = crate::platform::png::crop(&full_img, win_x.max(0) as u32, win_y.max(0) as u32, win_w.max(0) as u32, win_h.max(0) as u32)?;
+    let _ = std::fs::remove_file(&src_path);
+    let (cx, cy, cw, ch) = visible_crop(win_x, win_y, win_w, win_h);
+    let cropped = crate::platform::png::crop(&full_img, cx, cy, cw, ch)?;
     crate::platform::png::write_png(output, &cropped)?;
 
     Ok(json::success_with(vec![
@@ -72,12 +86,12 @@ pub fn screenshot_window(title: &str, output: &str) -> Result<String, String> {
     ]))
 }
 
-pub fn screenshot_window_by_id(id: u64, output: &str) -> Result<String, String> {
+pub fn screenshot_window_by_id(id: u32, output: &str) -> Result<String, String> {
     let mut conn = DbusConnection::connect()?;
 
     // Raise the window first
     let mut body = MarshalBuffer::new();
-    body.write_u32(id as u32);
+    body.write_u32(id);
     conn.call_method(
         "org.gnome.Shell",
         "/org/gnome/Shell/Extensions/Windows",
@@ -90,7 +104,7 @@ pub fn screenshot_window_by_id(id: u64, output: &str) -> Result<String, String> 
     std::thread::sleep(std::time::Duration::from_millis(300));
 
     // Get window details (x, y, width, height) for cropping
-    let details_json = windows::get_window_details(&mut conn, id as u32)?;
+    let details_json = windows::get_window_details(&mut conn, id)?;
     let win_x = crate::json::extract_json_number(&details_json, "x")
         .ok_or_else(|| "Window details missing 'x' field".to_string())?;
     let win_y = crate::json::extract_json_number(&details_json, "y")
@@ -104,9 +118,11 @@ pub fn screenshot_window_by_id(id: u64, output: &str) -> Result<String, String> 
     let uri = take_portal_screenshot(&mut conn)?;
     let src_path = uri_to_path(&uri)?;
 
-    // Read, crop, and write the PNG (clamp negative coords to 0)
+    // Read, crop to the visible part of the window, and write the PNG
     let full_img = crate::platform::png::read_png(&src_path)?;
-    let cropped = crate::platform::png::crop(&full_img, win_x.max(0) as u32, win_y.max(0) as u32, win_w.max(0) as u32, win_h.max(0) as u32)?;
+    let _ = std::fs::remove_file(&src_path);
+    let (cx, cy, cw, ch) = visible_crop(win_x, win_y, win_w, win_h);
+    let cropped = crate::platform::png::crop(&full_img, cx, cy, cw, ch)?;
     crate::platform::png::write_png(output, &cropped)?;
 
     Ok(json::success_with(vec![
@@ -124,7 +140,11 @@ fn take_portal_screenshot(conn: &mut DbusConnection) -> Result<String, String> {
     let sender_escaped = conn.unique_name()
         .trim_start_matches(':')
         .replace('.', "_");
-    let token = format!("gui_tool_{}", std::process::id());
+    // Token must be unique per request, not just per process — concurrent
+    // requests (e.g. parallel tests) would otherwise collide on the handle.
+    static REQUEST_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let seq = REQUEST_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let token = format!("gui_tool_{}_{}", std::process::id(), seq);
     let handle_path = format!(
         "/org/freedesktop/portal/desktop/request/{}/{}",
         sender_escaped, token
@@ -153,7 +173,7 @@ fn take_portal_screenshot(conn: &mut DbusConnection) -> Result<String, String> {
 
     let body_bytes = body.into_bytes();
 
-    conn.call_method(
+    let reply = conn.call_method(
         PORTAL_DEST,
         PORTAL_PATH,
         PORTAL_IFACE,
@@ -162,8 +182,21 @@ fn take_portal_screenshot(conn: &mut DbusConnection) -> Result<String, String> {
         &body_bytes,
     )?;
 
+    // The method reply carries the actual request object path. Portals
+    // predating xdg-desktop-portal 0.9 use a different handle than the
+    // predicted one — listen on the path the portal actually returned.
+    let mut rbuf = super::dbus::types::UnmarshalBuffer::new(&reply.body);
+    let actual_handle = rbuf.read_object_path().unwrap_or_else(|_| handle_path.clone());
+    if actual_handle != handle_path {
+        let rule = format!(
+            "type='signal',interface='org.freedesktop.portal.Request',member='Response',path='{}'",
+            actual_handle
+        );
+        conn.add_match(&rule)?;
+    }
+
     let signal = conn.wait_for_signal(
-        &handle_path,
+        &actual_handle,
         "org.freedesktop.portal.Request",
         "Response",
         10_000,

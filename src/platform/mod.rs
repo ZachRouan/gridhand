@@ -26,6 +26,10 @@ pub(crate) mod png;
 mod tests {
     use super::*;
 
+    /// The screenshot portal rejects concurrent capture requests, so tests
+    /// that take screenshots must not run in parallel with each other.
+    static SCREENSHOT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     #[ignore]
     fn test_list_windows() {
@@ -89,6 +93,7 @@ mod tests {
     #[test]
     #[ignore]
     fn test_screenshot_full() {
+        let _guard = SCREENSHOT_LOCK.lock().unwrap();
         let path = "/tmp/gui-tool-test-screenshot.png";
         let _ = std::fs::remove_file(path);
 
@@ -109,6 +114,7 @@ mod tests {
     #[test]
     #[ignore]
     fn test_screenshot_window_by_id() {
+        let _guard = SCREENSHOT_LOCK.lock().unwrap();
         // First get a window ID from list
         let list_result = list_windows();
         assert!(list_result.is_ok());

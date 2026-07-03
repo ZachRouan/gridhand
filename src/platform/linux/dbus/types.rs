@@ -178,11 +178,127 @@ impl<'a> UnmarshalBuffer<'a> {
         let sig = self.read_signature()?;
         match sig.as_str() {
             "s" | "o" => Ok(Some(self.read_string()?)),
-            "b" => { self.read_u32()?; Ok(None) }
-            "u" => { self.read_u32()?; Ok(None) }
             _ => {
-                Err(format!("Cannot parse variant with signature '{}'", sig))
+                // Not a string: skip the value by its signature. Erroring here
+                // would abort dict scans (e.g. the portal response) whenever a
+                // backend adds a key of a type we don't consume.
+                self.skip_value(&sig, 0)?;
+                Ok(None)
             }
         }
+    }
+
+    fn advance(&mut self, n: usize) -> Result<(), String> {
+        if self.pos + n > self.data.len() {
+            return Err("Unexpected end of data while skipping value".to_string());
+        }
+        self.pos += n;
+        Ok(())
+    }
+
+    /// Skip one complete value of the given signature. Bounds-checked so
+    /// malformed data errors instead of panicking.
+    fn skip_value(&mut self, sig: &str, depth: u8) -> Result<(), String> {
+        if depth > 32 {
+            return Err("D-Bus signature nesting too deep".to_string());
+        }
+        let first = *sig.as_bytes().first().ok_or("Empty type signature")?;
+        match first {
+            b'y' => { self.read_byte()?; }
+            b'n' | b'q' => { self.align(2); self.advance(2)?; }
+            b'b' | b'i' | b'u' | b'h' => { self.align(4); self.advance(4)?; }
+            b'x' | b't' | b'd' => { self.align(8); self.advance(8)?; }
+            b's' | b'o' => { self.read_string()?; }
+            b'g' => { self.read_signature()?; }
+            b'a' => {
+                let len = self.read_u32()? as usize;
+                self.align(type_alignment(&sig[1..]));
+                self.advance(len)?;
+            }
+            b'v' => {
+                let inner = self.read_signature()?;
+                self.skip_value(&inner, depth + 1)?;
+            }
+            b'(' | b'{' => {
+                self.align(8);
+                let inner = &sig[1..sig.len().saturating_sub(1)];
+                let mut rest = inner;
+                while !rest.is_empty() {
+                    let n = complete_type_len(rest)?;
+                    self.skip_value(&rest[..n], depth + 1)?;
+                    rest = &rest[n..];
+                }
+            }
+            other => return Err(format!("Unsupported type in signature: {}", other as char)),
+        }
+        Ok(())
+    }
+}
+
+/// Alignment of a D-Bus type, from the first character of its signature.
+pub(crate) fn type_alignment(sig: &str) -> usize {
+    match sig.as_bytes().first() {
+        Some(b'y') | Some(b'g') | Some(b'v') => 1,
+        Some(b'n') | Some(b'q') => 2,
+        Some(b'x') | Some(b't') | Some(b'd') | Some(b'(') | Some(b'{') => 8,
+        _ => 4, // b i u h s o a
+    }
+}
+
+/// Length in bytes of the first complete type in a signature
+/// (e.g. "a{sv}u" -> 5, covering "a{sv}").
+pub(crate) fn complete_type_len(sig: &str) -> Result<usize, String> {
+    let bytes = sig.as_bytes();
+    match bytes.first() {
+        None => Err("Empty type signature".to_string()),
+        Some(b'a') => Ok(1 + complete_type_len(&sig[1..])?),
+        Some(open @ (b'(' | b'{')) => {
+            let close = if *open == b'(' { b')' } else { b'}' };
+            let mut depth = 0usize;
+            for (i, &c) in bytes.iter().enumerate() {
+                if c == *open { depth += 1; }
+                if c == close {
+                    depth -= 1;
+                    if depth == 0 { return Ok(i + 1); }
+                }
+            }
+            Err(format!("Unbalanced container in signature: {}", sig))
+        }
+        Some(_) => Ok(1),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_read_variant_skips_unknown_types() {
+        // A portal backend may add keys of types we don't consume (doubles,
+        // structs) before "uri" — they must be skipped, not fatal.
+        let mut buf = MarshalBuffer::new();
+        buf.write_signature("d");
+        buf.align(8);
+        buf.data.extend_from_slice(&1.5f64.to_le_bytes());
+        buf.write_string("after");
+        let bytes = buf.into_bytes();
+
+        let mut ubuf = UnmarshalBuffer::new(&bytes);
+        assert_eq!(ubuf.read_variant_string().unwrap(), None);
+        assert_eq!(ubuf.read_string().unwrap(), "after");
+    }
+
+    #[test]
+    fn test_read_variant_still_reads_strings_and_bools() {
+        let mut buf = MarshalBuffer::new();
+        buf.write_variant_string("hello");
+        buf.write_variant_bool(true);
+        buf.write_variant_string("world");
+        let bytes = buf.into_bytes();
+
+        let mut ubuf = UnmarshalBuffer::new(&bytes);
+        assert_eq!(ubuf.read_variant_string().unwrap(), Some("hello".to_string()));
+        assert_eq!(ubuf.read_variant_string().unwrap(), None);
+        assert_eq!(ubuf.read_variant_string().unwrap(), Some("world".to_string()));
     }
 }

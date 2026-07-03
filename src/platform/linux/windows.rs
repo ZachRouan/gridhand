@@ -24,11 +24,11 @@ pub fn list_windows() -> Result<String, String> {
     ]))
 }
 
-pub fn raise_window(id: u64) -> Result<String, String> {
+pub fn raise_window(id: u32) -> Result<String, String> {
     let mut conn = DbusConnection::connect()?;
 
     let mut body = MarshalBuffer::new();
-    body.write_u32(id as u32);
+    body.write_u32(id);
 
     conn.call_method(
         DEST, PATH, IFACE,

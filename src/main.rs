@@ -459,11 +459,14 @@ fn cmd_windows(args: &[String]) -> Result<String, String> {
     }
 }
 
+/// Parsed `mouse click` arguments: (--cell ref, --grid density, button).
+type MouseClickArgs = (Option<String>, Option<(u32, u32)>, String);
+
 /// Parse `mouse click` arguments strictly. Unknown arguments and malformed
 /// flag values are errors: a silently dropped --grid clicks a different pixel
 /// than the grid the agent computed against, and a stray word must not
 /// quietly become the button.
-fn parse_mouse_click_args(args: &[String]) -> Result<(Option<String>, Option<(u32, u32)>, String), String> {
+fn parse_mouse_click_args(args: &[String]) -> Result<MouseClickArgs, String> {
     let mut cell: Option<String> = None;
     let mut grid: Option<(u32, u32)> = None;
     let mut button = "left".to_string();

@@ -1074,6 +1074,7 @@ pub fn dim_outside(img: &mut Image, rx: u32, ry: u32, rw: u32, rh: u32) {
 /// Draw parent-level grid lines and cell labels in the context (dimmed) area.
 /// This shows the agent which parent cells surround the target, so it can
 /// adjust its cell reference (e.g., switch from D3 to E3).
+#[allow(clippy::too_many_arguments)]
 pub fn draw_context_grid(
     img: &mut Image,
     tx: u32, ty: u32, tw: u32, th: u32,       // target cell region (scaled)

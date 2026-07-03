@@ -53,9 +53,12 @@ pub fn parse_cell_ref(s: &str) -> Result<(u32, u32), String> {
     Ok((col, row - 1))
 }
 
+/// Two adjacent (col, row) cells named by a between-cell reference.
+pub type CellPair = ((u32, u32), (u32, u32));
+
 /// Parse a between-cell reference like "D3+E3" into two (col, row) pairs.
 /// Validates that the two cells are adjacent (horizontally, vertically, or diagonally).
-pub fn parse_between_ref(s: &str) -> Result<((u32, u32), (u32, u32)), String> {
+pub fn parse_between_ref(s: &str) -> Result<CellPair, String> {
     let halves: Vec<&str> = s.split('+').collect();
     if halves.len() != 2 {
         return Err(format!("Invalid between-cell reference '{}'. Use format like D3+E3", s));

@@ -42,7 +42,6 @@ unsafe fn ioctl(fd: i32, request: u64, arg: u64) -> i64 {
 // uinput ioctl commands
 const UI_SET_EVBIT: u64 = 0x40045564;
 const UI_SET_KEYBIT: u64 = 0x40045565;
-const UI_SET_RELBIT: u64 = 0x40045566;
 const UI_SET_ABSBIT: u64 = 0x40045567;
 const UI_DEV_CREATE: u64 = 0x5501;
 const UI_DEV_DESTROY: u64 = 0x5502;
@@ -50,15 +49,12 @@ const UI_DEV_DESTROY: u64 = 0x5502;
 // Event types
 const EV_SYN: u16 = 0x00;
 const EV_KEY: u16 = 0x01;
-const EV_REL: u16 = 0x02;
 const EV_ABS: u16 = 0x03;
 
 // Sync
 const SYN_REPORT: u16 = 0;
 
 // Relative axes
-const REL_X: u16 = 0x00;
-const REL_Y: u16 = 0x01;
 
 // Absolute axes
 const ABS_X: u16 = 0x00;
@@ -233,8 +229,17 @@ struct UinputDevice {
     file: File,
 }
 
+/// What capabilities the virtual device advertises. Keeping these minimal
+/// matters: a "mouse" that also claims all 256 keyboard keys can get
+/// classified as a keyboard by libinput/desktop environments.
+#[derive(PartialEq, Clone, Copy)]
+enum DeviceKind {
+    Mouse,
+    Keyboard,
+}
+
 impl UinputDevice {
-    fn create(name: &str, abs: bool) -> Result<Self, String> {
+    fn create(name: &str, kind: DeviceKind) -> Result<Self, String> {
         let file = OpenOptions::new()
             .write(true)
             .custom_flags(O_NONBLOCK)
@@ -250,25 +255,21 @@ impl UinputDevice {
             // Enable EV_SYN
             check_ioctl(ioctl(fd, UI_SET_EVBIT, EV_SYN as u64), "UI_SET_EVBIT EV_SYN")?;
 
-            // Enable all keys we might need (0..255 covers all standard keys)
-            for code in 0u64..256 {
-                ioctl(fd, UI_SET_KEYBIT, code);
-            }
-
-            // Enable mouse buttons
-            ioctl(fd, UI_SET_KEYBIT, BTN_LEFT as u64);
-            ioctl(fd, UI_SET_KEYBIT, BTN_RIGHT as u64);
-
-            if abs {
-                // Absolute positioning (for mouse move to coordinates)
-                check_ioctl(ioctl(fd, UI_SET_EVBIT, EV_ABS as u64), "UI_SET_EVBIT EV_ABS")?;
-                check_ioctl(ioctl(fd, UI_SET_ABSBIT, ABS_X as u64), "UI_SET_ABSBIT ABS_X")?;
-                check_ioctl(ioctl(fd, UI_SET_ABSBIT, ABS_Y as u64), "UI_SET_ABSBIT ABS_Y")?;
-            } else {
-                // Relative mouse (for scroll, relative moves)
-                check_ioctl(ioctl(fd, UI_SET_EVBIT, EV_REL as u64), "UI_SET_EVBIT EV_REL")?;
-                check_ioctl(ioctl(fd, UI_SET_RELBIT, REL_X as u64), "UI_SET_RELBIT REL_X")?;
-                check_ioctl(ioctl(fd, UI_SET_RELBIT, REL_Y as u64), "UI_SET_RELBIT REL_Y")?;
+            match kind {
+                DeviceKind::Keyboard => {
+                    // All standard keyboard keys (0..255)
+                    for code in 0u64..256 {
+                        check_ioctl(ioctl(fd, UI_SET_KEYBIT, code), "UI_SET_KEYBIT")?;
+                    }
+                }
+                DeviceKind::Mouse => {
+                    check_ioctl(ioctl(fd, UI_SET_KEYBIT, BTN_LEFT as u64), "UI_SET_KEYBIT BTN_LEFT")?;
+                    check_ioctl(ioctl(fd, UI_SET_KEYBIT, BTN_RIGHT as u64), "UI_SET_KEYBIT BTN_RIGHT")?;
+                    // Absolute positioning (mouse move to coordinates)
+                    check_ioctl(ioctl(fd, UI_SET_EVBIT, EV_ABS as u64), "UI_SET_EVBIT EV_ABS")?;
+                    check_ioctl(ioctl(fd, UI_SET_ABSBIT, ABS_X as u64), "UI_SET_ABSBIT ABS_X")?;
+                    check_ioctl(ioctl(fd, UI_SET_ABSBIT, ABS_Y as u64), "UI_SET_ABSBIT ABS_Y")?;
+                }
             }
 
             // Write uinput_user_dev struct (1116 bytes)
@@ -279,7 +280,7 @@ impl UinputDevice {
             // BUS_VIRTUAL = 0x06 at offset 80
             dev[80] = 0x06;
 
-            if abs {
+            if kind == DeviceKind::Mouse {
                 let (sw, sh) = detect_screen_size();
                 // absmax[ABS_X] at offset 92 (i32 little-endian)
                 let w = sw.to_le_bytes();
@@ -443,13 +444,12 @@ fn modifier_to_key(name: &str) -> Option<u16> {
         "f10" => Some(KEY_F10),
         "f11" => Some(KEY_F11),
         "f12" => Some(KEY_F12),
-        s if s.len() == 1 => char_to_key(s.chars().next().unwrap()).map(|(k, _)| k),
         _ => None,
     }
 }
 
 pub fn mouse_move(x: i32, y: i32) -> Result<String, String> {
-    let mut dev = UinputDevice::create("gui-tool-mouse", true)?;
+    let mut dev = UinputDevice::create("gui-tool-mouse", DeviceKind::Mouse)?;
     dev.write_event(EV_ABS, ABS_X, x)?;
     dev.write_event(EV_ABS, ABS_Y, y)?;
     dev.syn()?;
@@ -463,7 +463,7 @@ pub fn mouse_click(button: &str) -> Result<String, String> {
         "right" => BTN_RIGHT,
         _ => return Err(format!("Unknown button: {}. Use 'left' or 'right'", button)),
     };
-    let mut dev = UinputDevice::create("gui-tool-mouse", true)?;
+    let mut dev = UinputDevice::create("gui-tool-mouse", DeviceKind::Mouse)?;
     dev.write_event(EV_KEY, btn, 1)?;
     dev.syn()?;
     std::thread::sleep(std::time::Duration::from_millis(50));
@@ -501,7 +501,7 @@ pub fn key_type(text: &str) -> Result<String, String> {
         ));
     }
 
-    let mut dev = UinputDevice::create("gui-tool-kbd", false)?;
+    let mut dev = UinputDevice::create("gui-tool-kbd", DeviceKind::Keyboard)?;
     for c in text.chars() {
         if let Some((code, shift)) = char_to_key(c) {
             if shift {
@@ -518,16 +518,54 @@ pub fn key_type(text: &str) -> Result<String, String> {
     Ok(crate::json::success())
 }
 
-pub fn key_press(combo: &str) -> Result<String, String> {
-    let parts: Vec<&str> = combo.split('+').collect();
+/// Split a combo on '+', treating a doubled '+' as the literal plus key
+/// ("ctrl++" is ctrl and '+').
+fn split_combo(combo: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut cur = String::new();
+    for c in combo.chars() {
+        if c == '+' {
+            if cur.is_empty() {
+                cur.push('+');
+            }
+            parts.push(std::mem::take(&mut cur));
+        } else {
+            cur.push(c);
+        }
+    }
+    if !cur.is_empty() {
+        parts.push(cur);
+    }
+    parts
+}
+
+/// Resolve a combo into the ordered key sequence to press. Characters that
+/// need shift on the US layout get KEY_LEFTSHIFT inserted before them —
+/// "ctrl+%" must press ctrl+shift+5, not ctrl+5.
+fn combo_to_keys(combo: &str) -> Result<Vec<u16>, String> {
     let mut keys: Vec<u16> = Vec::new();
-    for part in &parts {
-        let key = modifier_to_key(&part.to_lowercase())
+    for part in split_combo(combo) {
+        let lower = part.to_lowercase();
+        let mut chars = lower.chars();
+        if let (Some(c), None) = (chars.next(), chars.next())
+            && let Some((code, shift)) = char_to_key(c) {
+                if shift && !keys.contains(&KEY_LEFTSHIFT) {
+                    keys.push(KEY_LEFTSHIFT);
+                }
+                keys.push(code);
+                continue;
+        }
+        let key = modifier_to_key(&lower)
             .ok_or_else(|| format!("Unknown key: {}", part))?;
         keys.push(key);
     }
+    Ok(keys)
+}
 
-    let mut dev = UinputDevice::create("gui-tool-kbd", false)?;
+pub fn key_press(combo: &str) -> Result<String, String> {
+    let keys = combo_to_keys(combo)?;
+
+    let mut dev = UinputDevice::create("gui-tool-kbd", DeviceKind::Keyboard)?;
 
     // Press all keys down in order
     for &key in &keys {
@@ -548,6 +586,28 @@ pub fn key_press(combo: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_split_combo() {
+        assert_eq!(split_combo("ctrl+a"), vec!["ctrl", "a"]);
+        assert_eq!(split_combo("ctrl+shift+t"), vec!["ctrl", "shift", "t"]);
+        // A doubled '+' is the literal plus key
+        assert_eq!(split_combo("ctrl++"), vec!["ctrl", "+"]);
+        assert_eq!(split_combo("+"), vec!["+"]);
+    }
+
+    #[test]
+    fn test_combo_to_keys_shifted_char_includes_shift() {
+        // ctrl+% must press ctrl+shift+5, not ctrl+5
+        let keys = combo_to_keys("ctrl+%").unwrap();
+        assert_eq!(keys, vec![KEY_LEFTCTRL, KEY_LEFTSHIFT, KEY_5]);
+        // Unshifted chars must not gain a shift
+        let keys = combo_to_keys("ctrl+5").unwrap();
+        assert_eq!(keys, vec![KEY_LEFTCTRL, KEY_5]);
+        // The plus key itself is shift+equal on US layout
+        let keys = combo_to_keys("ctrl++").unwrap();
+        assert_eq!(keys, vec![KEY_LEFTCTRL, KEY_LEFTSHIFT, KEY_EQUAL]);
+    }
 
     #[test]
     fn test_untypeable_chars() {

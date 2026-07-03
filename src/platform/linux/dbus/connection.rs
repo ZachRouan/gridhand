@@ -20,9 +20,7 @@ pub struct DbusConnection {
 #[allow(dead_code)]
 impl DbusConnection {
     pub fn connect() -> Result<Self, String> {
-        let path = get_session_bus_path()?;
-        let mut stream = UnixStream::connect(&path)
-            .map_err(|e| format!("Failed to connect to D-Bus at {}: {}", path, e))?;
+        let mut stream = connect_session_bus()?;
 
         auth::authenticate(&mut stream)?;
 
@@ -278,19 +276,36 @@ mod tests {
     }
 }
 
-fn get_session_bus_path() -> Result<String, String> {
-    if let Ok(addr) = std::env::var("DBUS_SESSION_BUS_ADDRESS") {
-        for part in addr.split(',') {
+/// Connect to the session bus. DBUS_SESSION_BUS_ADDRESS is a ';'-separated
+/// list of addresses, each "transport:key=val,key=val" — try each in order.
+/// Abstract sockets need SocketAddrExt (an interior-NUL path is rejected by
+/// UnixStream::connect, so the old "\0name" trick can never work).
+fn connect_session_bus() -> Result<UnixStream, String> {
+    let Ok(addr) = std::env::var("DBUS_SESSION_BUS_ADDRESS") else {
+        let path = format!("/run/user/{}/bus", auth::get_uid());
+        return UnixStream::connect(&path)
+            .map_err(|e| format!("Failed to connect to D-Bus at {}: {}", path, e));
+    };
+
+    let mut last_err = format!("no usable transport in '{}'", addr);
+    for entry in addr.split(';') {
+        for part in entry.split(',') {
             if let Some(path) = part.strip_prefix("unix:path=") {
-                return Ok(path.to_string());
-            }
-            if let Some(rest) = part.strip_prefix("unix:abstract=") {
-                return Ok(format!("\0{}", rest));
+                match UnixStream::connect(path) {
+                    Ok(s) => return Ok(s),
+                    Err(e) => last_err = format!("{}: {}", path, e),
+                }
+            } else if let Some(name) = part.strip_prefix("unix:abstract=") {
+                use std::os::linux::net::SocketAddrExt;
+                match std::os::unix::net::SocketAddr::from_abstract_name(name.as_bytes()) {
+                    Ok(sa) => match UnixStream::connect_addr(&sa) {
+                        Ok(s) => return Ok(s),
+                        Err(e) => last_err = format!("abstract:{}: {}", name, e),
+                    },
+                    Err(e) => last_err = format!("abstract:{}: {}", name, e),
+                }
             }
         }
-        Err(format!("Cannot parse DBUS_SESSION_BUS_ADDRESS: {}", addr))
-    } else {
-        let uid = auth::get_uid();
-        Ok(format!("/run/user/{}/bus", uid))
     }
+    Err(format!("Failed to connect to D-Bus session bus ({})", last_err))
 }

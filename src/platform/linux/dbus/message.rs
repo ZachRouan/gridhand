@@ -1,4 +1,4 @@
-use super::types::MarshalBuffer;
+use super::types::{complete_type_len, type_alignment, MarshalBuffer};
 
 const PROTOCOL_VERSION: u8 = 1;
 
@@ -213,39 +213,6 @@ pub fn parse_header(data: &[u8]) -> Result<(MessageHeader, usize), String> {
     }
 
     Ok((header, total))
-}
-
-/// Alignment of a D-Bus type, from the first character of its signature.
-fn type_alignment(sig: &str) -> usize {
-    match sig.as_bytes().first() {
-        Some(b'y') | Some(b'g') | Some(b'v') => 1,
-        Some(b'n') | Some(b'q') => 2,
-        Some(b'x') | Some(b't') | Some(b'd') | Some(b'(') | Some(b'{') => 8,
-        _ => 4, // b i u h s o a
-    }
-}
-
-/// Length in bytes of the first complete type in a signature
-/// (e.g. "a{sv}u" -> 5, covering "a{sv}").
-fn complete_type_len(sig: &str) -> Result<usize, String> {
-    let bytes = sig.as_bytes();
-    match bytes.first() {
-        None => Err("Empty type signature".to_string()),
-        Some(b'a') => Ok(1 + complete_type_len(&sig[1..])?),
-        Some(open @ (b'(' | b'{')) => {
-            let close = if *open == b'(' { b')' } else { b'}' };
-            let mut depth = 0usize;
-            for (i, &c) in bytes.iter().enumerate() {
-                if c == *open { depth += 1; }
-                if c == close {
-                    depth -= 1;
-                    if depth == 0 { return Ok(i + 1); }
-                }
-            }
-            Err(format!("Unbalanced container in signature: {}", sig))
-        }
-        Some(_) => Ok(1),
-    }
 }
 
 /// Skip one complete value of the given signature starting at `pos`,
