@@ -82,6 +82,7 @@ pub const MOUSEEVENTF_ABSOLUTE: u32 = 0x8000;
 // --- Keyboard event flags ---
 
 pub const KEYEVENTF_KEYUP: u32 = 0x0002;
+pub const KEYEVENTF_UNICODE: u32 = 0x0004;
 
 // --- Virtual key codes ---
 
@@ -236,6 +237,23 @@ pub fn keyboard_input(vk: u16, flags: u32) -> INPUT {
                 wVk: vk,
                 wScan: 0,
                 dwFlags: flags,
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    }
+}
+
+/// Create a unicode keyboard INPUT event: the UTF-16 unit goes in wScan with
+/// KEYEVENTF_UNICODE set, and wVk must be zero.
+pub fn keyboard_unicode_input(unit: u16, flags: u32) -> INPUT {
+    INPUT {
+        type_: INPUT_KEYBOARD,
+        union_: INPUT_UNION {
+            ki: KEYBDINPUT {
+                wVk: 0,
+                wScan: unit,
+                dwFlags: KEYEVENTF_UNICODE | flags,
                 time: 0,
                 dwExtraInfo: 0,
             },

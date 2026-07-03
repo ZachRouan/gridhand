@@ -473,7 +473,34 @@ pub fn mouse_click(button: &str) -> Result<String, String> {
     Ok(crate::json::success())
 }
 
+/// Characters that this backend's keycode map cannot produce. uinput sends
+/// layout-independent keycodes (interpreted by the compositor as US QWERTY),
+/// so anything beyond printable ASCII has no keycode to send.
+fn untypeable_chars(text: &str) -> Vec<char> {
+    let mut seen = Vec::new();
+    for c in text.chars() {
+        if char_to_key(c).is_none() && !seen.contains(&c) {
+            seen.push(c);
+        }
+    }
+    seen
+}
+
 pub fn key_type(text: &str) -> Result<String, String> {
+    // Validate the whole string before sending any event: partially typed
+    // text with a success status would leave the agent unable to detect the
+    // loss, and partially typed text with an error is worse than neither.
+    let missing = untypeable_chars(text);
+    if !missing.is_empty() {
+        let shown: Vec<String> = missing.iter().take(5).map(|c| format!("'{}'", c)).collect();
+        let suffix = if missing.len() > 5 { ", ..." } else { "" };
+        return Err(format!(
+            "Cannot type {}{}: the Linux uinput backend can only synthesize printable ASCII \
+             (US-layout keycodes). Nothing was typed.",
+            shown.join(", "), suffix
+        ));
+    }
+
     let mut dev = UinputDevice::create("gui-tool-kbd", false)?;
     for c in text.chars() {
         if let Some((code, shift)) = char_to_key(c) {
@@ -521,6 +548,24 @@ pub fn key_press(combo: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_untypeable_chars() {
+        assert!(untypeable_chars("Hello, World! 123 <>?~`|\\").is_empty());
+        assert_eq!(untypeable_chars("café → done"), vec!['é', '→']);
+    }
+
+    #[test]
+    fn test_key_type_rejects_untypeable_text_atomically() {
+        // Validation must happen before any key event is sent, and the error
+        // must name the characters — silently typing "caf" and reporting
+        // success leaves the agent with no way to detect the loss.
+        let result = key_type("café");
+        assert!(result.is_err(), "non-ASCII text must be rejected");
+        let err = result.err().unwrap();
+        assert!(err.contains('é'), "error must name the character, got: {}", err);
+        assert!(err.to_lowercase().contains("nothing was typed"), "error must state atomicity, got: {}", err);
+    }
 
     #[test]
     fn test_parse_mode_standard() {

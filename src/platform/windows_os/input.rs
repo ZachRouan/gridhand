@@ -48,19 +48,14 @@ pub fn mouse_click(button: &str) -> Result<String, String> {
 }
 
 pub fn key_type(text: &str) -> Result<String, String> {
-    for c in text.chars() {
-        let (vk, shift) = char_to_vk(c)?;
-
-        if shift {
-            send_key(VK_SHIFT, false)?;
-        }
-        send_key(vk, false)?;
+    // KEYEVENTF_UNICODE types the character itself, independent of the
+    // active keyboard layout — this covers accents, AltGr characters, and
+    // non-BMP chars (each UTF-16 unit, including surrogate halves, is sent
+    // as its own down/up pair, which receivers reassemble).
+    for unit in text.encode_utf16() {
+        send_unicode(unit, false)?;
         std::thread::sleep(std::time::Duration::from_millis(10));
-        send_key(vk, true)?;
-        if shift {
-            send_key(VK_SHIFT, true)?;
-        }
-
+        send_unicode(unit, true)?;
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
 
@@ -78,15 +73,28 @@ pub fn key_press(combo: &str) -> Result<String, String> {
     }
 
     // Press all keys down in order
-    for &vk in &keycodes {
-        send_key(vk, false)?;
+    for (idx, &vk) in keycodes.iter().enumerate() {
+        if let Err(e) = send_key(vk, false) {
+            // Release anything already pressed so modifiers don't stay stuck
+            // down machine-wide, then report the failure.
+            for &pressed in keycodes[..idx].iter().rev() {
+                let _ = send_key(pressed, true);
+            }
+            return Err(e);
+        }
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
 
-    // Release in reverse order
+    // Release in reverse order, attempting every key even if one fails
+    let mut release_err = None;
     for &vk in keycodes.iter().rev() {
-        send_key(vk, true)?;
+        if let Err(e) = send_key(vk, true) {
+            release_err.get_or_insert(e);
+        }
         std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    if let Some(e) = release_err {
+        return Err(e);
     }
 
     std::thread::sleep(std::time::Duration::from_millis(50));
@@ -106,15 +114,15 @@ fn send_key(vk: u16, key_up: bool) -> Result<(), String> {
     }
 }
 
-/// Map a character to (virtual keycode, needs_shift) using VkKeyScanW.
-fn char_to_vk(c: char) -> Result<(u16, bool), String> {
-    let result = unsafe { VkKeyScanW(c as u16) };
-    if result == -1 {
-        return Err(format!("Cannot map character '{}' to a virtual key", c));
+fn send_unicode(unit: u16, key_up: bool) -> Result<(), String> {
+    let flags = if key_up { KEYEVENTF_KEYUP } else { 0 };
+    let input = keyboard_unicode_input(unit, flags);
+    let sent = unsafe { SendInput(1, &input, input_size()) };
+    if sent != 1 {
+        Err(format!("Failed to send unicode key event (U+{:04X})", unit))
+    } else {
+        Ok(())
     }
-    let vk = (result & 0xFF) as u16;
-    let shift = (result >> 8) & 1 != 0;
-    Ok((vk, shift))
 }
 
 /// Map a modifier/key name to a Windows virtual keycode.

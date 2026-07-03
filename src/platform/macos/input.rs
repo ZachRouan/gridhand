@@ -31,7 +31,7 @@ pub fn mouse_click(button: &str) -> Result<String, String> {
     };
 
     // Get current mouse position
-    let point = get_cursor_position();
+    let point = get_cursor_position()?;
 
     unsafe {
         let down = CGEventCreateMouseEvent(std::ptr::null(), down_type, point, btn);
@@ -56,33 +56,33 @@ pub fn mouse_click(button: &str) -> Result<String, String> {
 }
 
 pub fn key_type(text: &str) -> Result<String, String> {
+    // Attach the character to the event as a unicode string instead of
+    // synthesizing keycodes: this types any character (accents, symbols,
+    // emoji via surrogate pairs) and is independent of the active keyboard
+    // layout. The keycode map below remains only for key_press combos.
     for c in text.chars() {
-        if let Some((keycode, shift)) = char_to_keycode(c) {
-            unsafe {
-                if shift {
-                    let shift_down = CGEventCreateKeyboardEvent(std::ptr::null(), kVK_Shift, true);
-                    CGEventPost(kCGHIDEventTap, shift_down);
-                    CFRelease(shift_down);
-                }
-
-                let key_down = CGEventCreateKeyboardEvent(std::ptr::null(), keycode, true);
-                CGEventPost(kCGHIDEventTap, key_down);
-                CFRelease(key_down);
-
-                std::thread::sleep(std::time::Duration::from_millis(10));
-
-                let key_up = CGEventCreateKeyboardEvent(std::ptr::null(), keycode, false);
-                CGEventPost(kCGHIDEventTap, key_up);
-                CFRelease(key_up);
-
-                if shift {
-                    let shift_up = CGEventCreateKeyboardEvent(std::ptr::null(), kVK_Shift, false);
-                    CGEventPost(kCGHIDEventTap, shift_up);
-                    CFRelease(shift_up);
-                }
+        let mut buf = [0u16; 2];
+        let units = c.encode_utf16(&mut buf);
+        unsafe {
+            let down = CGEventCreateKeyboardEvent(std::ptr::null(), 0, true);
+            if down.is_null() {
+                return Err(format!("Failed to create keyboard event while typing '{}'", c));
             }
+            CGEventKeyboardSetUnicodeString(down, units.len(), units.as_ptr());
+            CGEventPost(kCGHIDEventTap, down);
+            CFRelease(down);
+
             std::thread::sleep(std::time::Duration::from_millis(10));
+
+            let up = CGEventCreateKeyboardEvent(std::ptr::null(), 0, false);
+            if up.is_null() {
+                return Err(format!("Failed to create keyboard event while typing '{}'", c));
+            }
+            CGEventKeyboardSetUnicodeString(up, units.len(), units.as_ptr());
+            CGEventPost(kCGHIDEventTap, up);
+            CFRelease(up);
         }
+        std::thread::sleep(std::time::Duration::from_millis(10));
     }
     std::thread::sleep(std::time::Duration::from_millis(50));
     Ok(crate::json::success())
@@ -99,8 +99,20 @@ pub fn key_press(combo: &str) -> Result<String, String> {
 
     unsafe {
         // Press all keys down in order
-        for &kc in &keycodes {
+        for (idx, &kc) in keycodes.iter().enumerate() {
             let event = CGEventCreateKeyboardEvent(std::ptr::null(), kc, true);
+            if event.is_null() {
+                // Release anything already pressed so modifiers don't stay
+                // stuck down machine-wide, then report the failure.
+                for &pressed in keycodes[..idx].iter().rev() {
+                    let up = CGEventCreateKeyboardEvent(std::ptr::null(), pressed, false);
+                    if !up.is_null() {
+                        CGEventPost(kCGHIDEventTap, up);
+                        CFRelease(up);
+                    }
+                }
+                return Err(format!("Failed to create key-down event for '{}'", combo));
+            }
             CGEventPost(kCGHIDEventTap, event);
             CFRelease(event);
             std::thread::sleep(std::time::Duration::from_millis(10));
@@ -109,6 +121,9 @@ pub fn key_press(combo: &str) -> Result<String, String> {
         // Release in reverse order
         for &kc in keycodes.iter().rev() {
             let event = CGEventCreateKeyboardEvent(std::ptr::null(), kc, false);
+            if event.is_null() {
+                return Err(format!("Failed to create key-up event for '{}'", combo));
+            }
             CGEventPost(kCGHIDEventTap, event);
             CFRelease(event);
             std::thread::sleep(std::time::Duration::from_millis(10));
@@ -121,7 +136,7 @@ pub fn key_press(combo: &str) -> Result<String, String> {
 
 // --- Helpers ---
 
-fn get_cursor_position() -> CGPoint {
+fn get_cursor_position() -> Result<CGPoint, String> {
     // Create a dummy mouse event to read current position
     // CGEventCreate returns an event at the current cursor position
     unsafe extern "C" {
@@ -130,9 +145,12 @@ fn get_cursor_position() -> CGPoint {
     }
     unsafe {
         let event = CGEventCreate(std::ptr::null());
+        if event.is_null() {
+            return Err("Failed to read cursor position (missing Accessibility permission?)".to_string());
+        }
         let point = CGEventGetLocation(event);
         CFRelease(event);
-        point
+        Ok(point)
     }
 }
 

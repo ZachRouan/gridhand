@@ -100,6 +100,13 @@ unsafe extern "C" {
         keyDown: bool,
     ) -> *mut c_void;
 
+    // UniCharCount is unsigned long (usize), UniChar is u16
+    pub fn CGEventKeyboardSetUnicodeString(
+        event: *mut c_void,
+        stringLength: usize,
+        unicodeString: *const u16,
+    );
+
     pub fn CGEventPost(tap: u32, event: *mut c_void);
 
     // Screenshots
