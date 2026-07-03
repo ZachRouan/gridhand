@@ -115,7 +115,7 @@ mod tests {
         let json = list_result.unwrap();
 
         // Extract first window ID
-        let windows_str = crate::json::extract_json_string(&json, "windows");
+        let windows_str = crate::json::extract_json_array(&json, "windows");
         assert!(windows_str.is_some(), "No windows field in: {}", json);
         let windows_val = windows_str.unwrap();
         let entries = crate::json::split_json_array(&windows_val);
