@@ -146,7 +146,9 @@ pub fn parse_header(data: &[u8]) -> Result<(MessageHeader, usize), String> {
         if pos >= fields_end { break; }
         let sig_len = data[pos] as usize;
         pos += 1;
-        if pos + sig_len + 1 > fields_end { break; }
+        if pos + sig_len + 1 > fields_end {
+            return Err("Truncated header field signature".to_string());
+        }
         let sig = std::str::from_utf8(&data[pos..pos + sig_len]).unwrap_or("");
         pos += sig_len + 1;
 
@@ -154,10 +156,14 @@ pub fn parse_header(data: &[u8]) -> Result<(MessageHeader, usize), String> {
             (FIELD_PATH, "o") | (FIELD_INTERFACE, "s") | (FIELD_MEMBER, "s") |
             (FIELD_ERROR_NAME, "s") | (FIELD_DESTINATION, "s") | (FIELD_SENDER, "s") => {
                 while pos % 4 != 0 { pos += 1; }
-                if pos + 4 > data.len() { break; }
+                if pos + 4 > data.len() {
+                    return Err("Truncated header field value".to_string());
+                }
                 let str_len = u32::from_le_bytes([data[pos], data[pos+1], data[pos+2], data[pos+3]]) as usize;
                 pos += 4;
-                if pos + str_len + 1 > data.len() { break; }
+                if pos + str_len + 1 > data.len() {
+                    return Err("Truncated header field value".to_string());
+                }
                 let val = String::from_utf8_lossy(&data[pos..pos + str_len]).to_string();
                 pos += str_len + 1;
 
@@ -173,21 +179,30 @@ pub fn parse_header(data: &[u8]) -> Result<(MessageHeader, usize), String> {
             }
             (FIELD_REPLY_SERIAL, "u") => {
                 while pos % 4 != 0 { pos += 1; }
-                if pos + 4 > data.len() { break; }
+                if pos + 4 > data.len() {
+                    return Err("Truncated header field value".to_string());
+                }
                 let v = u32::from_le_bytes([data[pos], data[pos+1], data[pos+2], data[pos+3]]);
                 pos += 4;
                 header.reply_serial = Some(v);
             }
             (FIELD_SIGNATURE, "g") => {
-                if pos >= data.len() { break; }
+                if pos >= data.len() {
+                    return Err("Truncated header field value".to_string());
+                }
                 let slen = data[pos] as usize;
                 pos += 1;
-                if pos + slen + 1 > data.len() { break; }
+                if pos + slen + 1 > data.len() {
+                    return Err("Truncated header field value".to_string());
+                }
                 header.signature = Some(String::from_utf8_lossy(&data[pos..pos + slen]).to_string());
                 pos += slen + 1;
             }
             _ => {
-                break;
+                // Unknown field code (or unexpected signature): skip its value
+                // by signature. Field order is not guaranteed by the spec, so
+                // aborting here could drop REPLY_SERIAL and orphan the reply.
+                pos = skip_value(data, pos, sig, 0)?;
             }
         }
     }
@@ -198,4 +213,167 @@ pub fn parse_header(data: &[u8]) -> Result<(MessageHeader, usize), String> {
     }
 
     Ok((header, total))
+}
+
+/// Alignment of a D-Bus type, from the first character of its signature.
+fn type_alignment(sig: &str) -> usize {
+    match sig.as_bytes().first() {
+        Some(b'y') | Some(b'g') | Some(b'v') => 1,
+        Some(b'n') | Some(b'q') => 2,
+        Some(b'x') | Some(b't') | Some(b'd') | Some(b'(') | Some(b'{') => 8,
+        _ => 4, // b i u h s o a
+    }
+}
+
+/// Length in bytes of the first complete type in a signature
+/// (e.g. "a{sv}u" -> 5, covering "a{sv}").
+fn complete_type_len(sig: &str) -> Result<usize, String> {
+    let bytes = sig.as_bytes();
+    match bytes.first() {
+        None => Err("Empty type signature".to_string()),
+        Some(b'a') => Ok(1 + complete_type_len(&sig[1..])?),
+        Some(open @ (b'(' | b'{')) => {
+            let close = if *open == b'(' { b')' } else { b'}' };
+            let mut depth = 0usize;
+            for (i, &c) in bytes.iter().enumerate() {
+                if c == *open { depth += 1; }
+                if c == close {
+                    depth -= 1;
+                    if depth == 0 { return Ok(i + 1); }
+                }
+            }
+            Err(format!("Unbalanced container in signature: {}", sig))
+        }
+        Some(_) => Ok(1),
+    }
+}
+
+/// Skip one complete value of the given signature starting at `pos`,
+/// returning the position just past it. Used for header fields this client
+/// doesn't understand; every access is bounds-checked so malformed data
+/// errors instead of panicking.
+fn skip_value(data: &[u8], mut pos: usize, sig: &str, depth: u8) -> Result<usize, String> {
+    if depth > 32 {
+        return Err("D-Bus signature nesting too deep".to_string());
+    }
+    let err = || "Truncated header field value".to_string();
+    let first = *sig.as_bytes().first().ok_or_else(err)?;
+
+    let align = |pos: usize, n: usize| (pos + n - 1) & !(n - 1);
+
+    match first {
+        b'y' => pos += 1,
+        b'n' | b'q' => pos = align(pos, 2) + 2,
+        b'b' | b'i' | b'u' | b'h' => pos = align(pos, 4) + 4,
+        b'x' | b't' | b'd' => pos = align(pos, 8) + 8,
+        b's' | b'o' => {
+            pos = align(pos, 4);
+            if pos + 4 > data.len() { return Err(err()); }
+            let len = u32::from_le_bytes([data[pos], data[pos+1], data[pos+2], data[pos+3]]) as usize;
+            pos += 4 + len + 1;
+        }
+        b'g' => {
+            if pos >= data.len() { return Err(err()); }
+            let len = data[pos] as usize;
+            pos += 1 + len + 1;
+        }
+        b'a' => {
+            pos = align(pos, 4);
+            if pos + 4 > data.len() { return Err(err()); }
+            let len = u32::from_le_bytes([data[pos], data[pos+1], data[pos+2], data[pos+3]]) as usize;
+            pos += 4;
+            pos = align(pos, type_alignment(&sig[1..]));
+            pos += len;
+        }
+        b'v' => {
+            if pos >= data.len() { return Err(err()); }
+            let slen = data[pos] as usize;
+            pos += 1;
+            if pos + slen + 1 > data.len() { return Err(err()); }
+            let inner = std::str::from_utf8(&data[pos..pos + slen])
+                .map_err(|_| "Invalid signature in variant".to_string())?
+                .to_string();
+            pos += slen + 1;
+            pos = skip_value(data, pos, &inner, depth + 1)?;
+        }
+        b'(' | b'{' => {
+            pos = align(pos, 8);
+            let inner = &sig[1..sig.len() - 1];
+            let mut rest = inner;
+            while !rest.is_empty() {
+                let tlen = complete_type_len(rest)?;
+                pos = skip_value(data, pos, &rest[..tlen], depth + 1)?;
+                rest = &rest[tlen..];
+            }
+        }
+        other => return Err(format!("Unsupported type in signature: {}", other as char)),
+    }
+
+    if pos > data.len() {
+        return Err(err());
+    }
+    Ok(pos)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build a 16-byte fixed header followed by the given field bytes.
+    fn make_header(msg_type: u8, fields: &[u8]) -> Vec<u8> {
+        let mut data = vec![b'l', msg_type, 0, PROTOCOL_VERSION];
+        data.extend_from_slice(&0u32.to_le_bytes()); // body length
+        data.extend_from_slice(&1u32.to_le_bytes()); // serial
+        data.extend_from_slice(&(fields.len() as u32).to_le_bytes());
+        data.extend_from_slice(fields);
+        data
+    }
+
+    #[test]
+    fn test_parse_header_skips_unknown_field() {
+        // Field 1: code 9 (UNIX_FDS, unknown to us), sig "u", value 1.
+        // Field 2: REPLY_SERIAL = 42. The spec does not guarantee field order,
+        // so an unknown field must be skipped, not abort the loop — otherwise
+        // the reply never matches and the caller waits forever.
+        let mut fields = vec![9u8, 1, b'u', 0]; // code, siglen, 'u', NUL (pos now 4-aligned)
+        fields.extend_from_slice(&1u32.to_le_bytes());
+        fields.extend_from_slice(&[FIELD_REPLY_SERIAL, 1, b'u', 0]);
+        fields.extend_from_slice(&42u32.to_le_bytes());
+
+        let data = make_header(METHOD_RETURN, &fields);
+        let (header, _) = parse_header(&data).unwrap();
+        assert_eq!(header.reply_serial, Some(42));
+    }
+
+    #[test]
+    fn test_parse_header_skips_unknown_string_field() {
+        // Unknown field with a string-typed variant before REPLY_SERIAL:
+        // the skipper must consume the value by its signature, not guess.
+        let mut fields = vec![200u8, 1, b's', 0]; // fictional code, sig "s"
+        fields.extend_from_slice(&5u32.to_le_bytes());
+        fields.extend_from_slice(b"hello\0");
+        // pad to 8 for next struct entry (currently at 4+4+6=14 -> 16)
+        fields.extend_from_slice(&[0, 0]);
+        fields.extend_from_slice(&[FIELD_REPLY_SERIAL, 1, b'u', 0]);
+        fields.extend_from_slice(&7u32.to_le_bytes());
+
+        let data = make_header(METHOD_RETURN, &fields);
+        let (header, _) = parse_header(&data).unwrap();
+        assert_eq!(header.reply_serial, Some(7));
+    }
+
+    #[test]
+    fn test_parse_header_normal_fields_still_work() {
+        // REPLY_SERIAL followed by SENDER, the common reply shape.
+        let mut fields = vec![FIELD_REPLY_SERIAL, 1, b'u', 0];
+        fields.extend_from_slice(&3u32.to_le_bytes());
+        fields.extend_from_slice(&[FIELD_SENDER, 1, b's', 0]);
+        fields.extend_from_slice(&4u32.to_le_bytes());
+        fields.extend_from_slice(b":1.5\0");
+
+        let data = make_header(METHOD_RETURN, &fields);
+        let (header, _) = parse_header(&data).unwrap();
+        assert_eq!(header.reply_serial, Some(3));
+        assert_eq!(header.sender.as_deref(), Some(":1.5"));
+    }
 }

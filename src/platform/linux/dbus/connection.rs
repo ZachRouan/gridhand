@@ -5,6 +5,11 @@ use super::auth;
 use super::message;
 use super::types::MarshalBuffer;
 
+/// Default deadline for a method call's reply. GNOME Shell and the portal
+/// answer in milliseconds; anything past this means the peer is wedged, and
+/// blocking forever would wedge the calling agent with us.
+const METHOD_CALL_TIMEOUT_MS: u64 = 10_000;
+
 #[allow(dead_code)]
 pub struct DbusConnection {
     stream: UnixStream,
@@ -55,6 +60,20 @@ impl DbusConnection {
         signature: Option<&str>,
         body: &[u8],
     ) -> Result<Reply, String> {
+        self.call_method_with_timeout(destination, path, interface, member, signature, body, METHOD_CALL_TIMEOUT_MS)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn call_method_with_timeout(
+        &mut self,
+        destination: &str,
+        path: &str,
+        interface: &str,
+        member: &str,
+        signature: Option<&str>,
+        body: &[u8],
+        timeout_ms: u64,
+    ) -> Result<Reply, String> {
         self.serial += 1;
         let msg = message::build_method_call(
             self.serial,
@@ -70,7 +89,8 @@ impl DbusConnection {
         self.stream.write_all(&msg)
             .map_err(|e| format!("Failed to send D-Bus message: {}", e))?;
 
-        self.read_reply(self.serial)
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
+        self.read_reply(self.serial, deadline, timeout_ms)
     }
 
     pub fn call_method_no_reply(
@@ -120,16 +140,15 @@ impl DbusConnection {
         expected_member: &str,
         timeout_ms: u64,
     ) -> Result<Reply, String> {
-        self.stream.set_read_timeout(Some(std::time::Duration::from_millis(timeout_ms)))
-            .map_err(|e| format!("Failed to set read timeout: {}", e))?;
-
-        let start = std::time::Instant::now();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
         loop {
-            if start.elapsed().as_millis() as u64 > timeout_ms {
-                return Err("Timeout waiting for signal".to_string());
-            }
-
-            let reply = self.read_next_message()?;
+            let reply = match self.read_next_message_before(deadline) {
+                Ok(r) => r,
+                Err(e) if e.contains("timed out") => {
+                    return Err("Timeout waiting for signal".to_string());
+                }
+                Err(e) => return Err(e),
+            };
 
             if reply.header.msg_type == message::SIGNAL {
                 let path_match = reply.header.path.as_deref() == Some(expected_path);
@@ -142,9 +161,15 @@ impl DbusConnection {
         }
     }
 
-    fn read_reply(&mut self, expected_serial: u32) -> Result<Reply, String> {
+    fn read_reply(&mut self, expected_serial: u32, deadline: std::time::Instant, timeout_ms: u64) -> Result<Reply, String> {
         loop {
-            let reply = self.read_next_message()?;
+            let reply = match self.read_next_message_before(deadline) {
+                Ok(r) => r,
+                Err(e) if e.contains("timed out") => {
+                    return Err(format!("D-Bus method call timed out after {}ms", timeout_ms));
+                }
+                Err(e) => return Err(e),
+            };
 
             if let Some(rs) = reply.header.reply_serial
                 && rs == expected_serial {
@@ -162,10 +187,31 @@ impl DbusConnection {
         }
     }
 
+    /// Read one message, giving up (with an error containing "timed out")
+    /// once the deadline passes. The read timeout is re-armed with the
+    /// remaining time before each read so the total wait honors the deadline.
+    fn read_next_message_before(&mut self, deadline: std::time::Instant) -> Result<Reply, String> {
+        let now = std::time::Instant::now();
+        if now >= deadline {
+            return Err("D-Bus read timed out".to_string());
+        }
+        self.stream.set_read_timeout(Some(deadline - now))
+            .map_err(|e| format!("Failed to set read timeout: {}", e))?;
+        self.read_next_message()
+    }
+
+    fn read_exact_or_timeout(&mut self, buf: &mut [u8], what: &str) -> Result<(), String> {
+        self.stream.read_exact(buf).map_err(|e| match e.kind() {
+            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => {
+                "D-Bus read timed out".to_string()
+            }
+            _ => format!("Failed to read {}: {}", what, e),
+        })
+    }
+
     fn read_next_message(&mut self) -> Result<Reply, String> {
         let mut header_buf = [0u8; 16];
-        self.stream.read_exact(&mut header_buf)
-            .map_err(|e| format!("Failed to read D-Bus message header: {}", e))?;
+        self.read_exact_or_timeout(&mut header_buf, "D-Bus message header")?;
 
         let fields_len = u32::from_le_bytes([
             header_buf[12], header_buf[13], header_buf[14], header_buf[15]
@@ -173,8 +219,7 @@ impl DbusConnection {
 
         let mut fields_buf = vec![0u8; fields_len];
         if fields_len > 0 {
-            self.stream.read_exact(&mut fields_buf)
-                .map_err(|e| format!("Failed to read header fields: {}", e))?;
+            self.read_exact_or_timeout(&mut fields_buf, "header fields")?;
         }
 
         let total_header = 16 + fields_len;
@@ -182,8 +227,7 @@ impl DbusConnection {
         let padding = padded_header - total_header;
         if padding > 0 {
             let mut pad = vec![0u8; padding];
-            self.stream.read_exact(&mut pad)
-                .map_err(|e| format!("Failed to read header padding: {}", e))?;
+            self.read_exact_or_timeout(&mut pad, "header padding")?;
         }
 
         let mut full_header = Vec::with_capacity(16 + fields_len);
@@ -195,8 +239,7 @@ impl DbusConnection {
         let body_len = header.body_len as usize;
         let mut body = vec![0u8; body_len];
         if body_len > 0 {
-            self.stream.read_exact(&mut body)
-                .map_err(|e| format!("Failed to read message body: {}", e))?;
+            self.read_exact_or_timeout(&mut body, "message body")?;
         }
 
         Ok(Reply { header, body })
@@ -207,6 +250,32 @@ impl DbusConnection {
 pub struct Reply {
     pub header: message::MessageHeader,
     pub body: Vec<u8>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_call_method_times_out_on_silent_peer() {
+        // A peer that never replies must produce a timeout error, not block
+        // this process (and the agent driving it) forever.
+        let (local, _remote) = UnixStream::pair().unwrap();
+        let mut conn = DbusConnection {
+            stream: local,
+            serial: 0,
+            unique_name: String::new(),
+        };
+
+        let start = std::time::Instant::now();
+        let result = conn.call_method_with_timeout(
+            "org.example", "/", "org.example", "Ping", None, &[], 200,
+        );
+        assert!(result.is_err(), "silent peer must yield an error");
+        let err = result.err().unwrap();
+        assert!(err.contains("timed out"), "error must mention timeout, got: {}", err);
+        assert!(start.elapsed().as_millis() < 5_000, "must return promptly");
+    }
 }
 
 fn get_session_bus_path() -> Result<String, String> {
