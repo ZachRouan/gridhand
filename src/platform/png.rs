@@ -14,6 +14,25 @@ pub struct Image {
 }
 
 /// Read a PNG file, returning decoded pixel data.
+/// Read only the dimensions of a PNG file (IHDR header parse, no pixel decode).
+pub fn read_png_dimensions(path: &str) -> Result<(u32, u32), String> {
+    let mut f = std::fs::File::open(path)
+        .map_err(|e| format!("Cannot open {}: {}", path, e))?;
+    let mut header = [0u8; 24];
+    std::io::Read::read_exact(&mut f, &mut header)
+        .map_err(|e| format!("Cannot read {}: {}", path, e))?;
+    if &header[..8] != b"\x89PNG\r\n\x1a\n" {
+        return Err(format!("Not a PNG file: {}", path));
+    }
+    // The IHDR chunk is required to come first
+    if &header[12..16] != b"IHDR" {
+        return Err(format!("PNG missing IHDR chunk: {}", path));
+    }
+    let width = u32::from_be_bytes([header[16], header[17], header[18], header[19]]);
+    let height = u32::from_be_bytes([header[20], header[21], header[22], header[23]]);
+    Ok((width, height))
+}
+
 pub fn read_png(path: &str) -> Result<Image, String> {
     let data = std::fs::read(path).map_err(|e| format!("Failed to read {}: {}", path, e))?;
     decode_png(&data)
@@ -1427,6 +1446,18 @@ mod tests {
         write_chunk(&mut data, b"IDAT", &zlib_compress(&[0u8; 64]));
         write_chunk(&mut data, b"IEND", &[]);
         data
+    }
+
+    #[test]
+    fn test_read_png_dimensions() {
+        let img = Image { width: 5, height: 7, bpp: 3, pixels: vec![0u8; 5 * 7 * 3] };
+        let path = std::env::temp_dir().join("gui-tool-test-dims.png");
+        let path = path.to_str().unwrap().to_string();
+        std::fs::write(&path, encode_png(&img).unwrap()).unwrap();
+        assert_eq!(read_png_dimensions(&path).unwrap(), (5, 7));
+        let _ = std::fs::remove_file(&path);
+
+        assert!(read_png_dimensions("/nonexistent/nope.png").is_err());
     }
 
     #[test]

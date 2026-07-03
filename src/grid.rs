@@ -72,25 +72,24 @@ pub fn parse_between_ref(s: &str) -> Result<((u32, u32), (u32, u32)), String> {
     Ok(((col1, row1), (col2, row2)))
 }
 
-/// Compute absolute screen coordinates from a cell chain like "B2.C1".
+/// Walk a cell chain like "B2.C1" within a WxH pixel space, returning the
+/// center point of the innermost cell (or the boundary midpoint for a
+/// between-cell ref) in that space.
 /// Uses f64 throughout to avoid integer division drift.
 /// Auto-scales grid density at each recursion level based on region size,
 /// simulating the same scale-up that screenshot zoom applies (min 640x480)
 /// so that grid densities match between screenshot and mouse move.
 /// If `explicit_grid` is Some, uses that fixed density instead of auto-scaling.
-/// Returns the center point of the innermost cell.
-pub fn cell_to_coords(
+fn cell_chain_center(
     cell_chain: &str,
-    bounds_x: i32,
-    bounds_y: i32,
-    bounds_w: u32,
-    bounds_h: u32,
+    space_w: u32,
+    space_h: u32,
     explicit_grid: Option<(u32, u32)>,
-) -> Result<(i32, i32), String> {
-    let mut x = bounds_x as f64;
-    let mut y = bounds_y as f64;
-    let mut w = bounds_w as f64;
-    let mut h = bounds_h as f64;
+) -> Result<(f64, f64), String> {
+    let mut x = 0f64;
+    let mut y = 0f64;
+    let mut w = space_w as f64;
+    let mut h = space_h as f64;
 
     let parts: Vec<&str> = cell_chain.split('.').collect();
 
@@ -144,12 +143,53 @@ pub fn cell_to_coords(
         h = cell_h;
     }
 
-    Ok(((x + w / 2.0) as i32, (y + h / 2.0) as i32))
+    Ok((x + w / 2.0, y + h / 2.0))
+}
+
+/// Compute absolute screen coordinates from a cell chain by doing all grid
+/// math in the screenshot's pixel space — the frame the agent actually looked
+/// at — then mapping the point linearly onto the window bounds. This keeps
+/// cell labels meaning the same region in the image and the click even when
+/// the screenshot is scaled relative to the bounds (e.g. HiDPI backing
+/// stores, where a 400x300-pt window yields an 800x600-px capture).
+#[allow(clippy::too_many_arguments)]
+pub fn cell_to_screen_coords(
+    cell_chain: &str,
+    img_w: u32,
+    img_h: u32,
+    bounds_x: i32,
+    bounds_y: i32,
+    bounds_w: u32,
+    bounds_h: u32,
+    explicit_grid: Option<(u32, u32)>,
+) -> Result<(i32, i32), String> {
+    if img_w == 0 || img_h == 0 {
+        return Err("Screenshot image has zero dimensions".to_string());
+    }
+    let (cx, cy) = cell_chain_center(cell_chain, img_w, img_h, explicit_grid)?;
+    let sx = bounds_x as f64 + cx * bounds_w as f64 / img_w as f64;
+    let sy = bounds_y as f64 + cy * bounds_h as f64 / img_h as f64;
+    Ok((sx as i32, sy as i32))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Bounds-space targeting is the img == bounds identity case of
+    /// cell_to_screen_coords (the 1:1 fallback used when no screenshot
+    /// exists). Kept as a helper so the coordinate expectations below stay
+    /// written in the familiar bounds-space form.
+    fn cell_to_coords(
+        chain: &str,
+        bx: i32,
+        by: i32,
+        bw: u32,
+        bh: u32,
+        grid: Option<(u32, u32)>,
+    ) -> Result<(i32, i32), String> {
+        cell_to_screen_coords(chain, bw, bh, bx, by, bw, bh, grid)
+    }
 
     #[test]
     fn test_parse_grid_default() {
@@ -271,6 +311,37 @@ mod tests {
         let (x, y) = cell_to_coords("D3+D4", 0, 0, 800, 600, Some((8, 6))).unwrap();
         assert_eq!(x, 350);
         assert_eq!(y, 300);
+    }
+
+    #[test]
+    fn test_cell_to_screen_coords_identity_matches_bounds_space() {
+        // When the screenshot has the same dimensions as the window bounds,
+        // image-space targeting must equal the bounds-space computation.
+        let via_image = cell_to_screen_coords("B2", 400, 300, 100, 50, 400, 300, Some((4, 3))).unwrap();
+        let via_bounds = cell_to_coords("B2", 100, 50, 400, 300, Some((4, 3))).unwrap();
+        assert_eq!(via_image, via_bounds);
+        assert_eq!(via_image, (250, 200));
+    }
+
+    #[test]
+    fn test_cell_to_screen_coords_retina_2x() {
+        // Screenshot at 2x backing scale (800x600 image for a 400x300-pt
+        // window). The cell center must land on the same screen point as the
+        // 1x case — the grid is computed on the image, then mapped to bounds.
+        let (x, y) = cell_to_screen_coords("B2", 800, 600, 100, 50, 400, 300, Some((4, 3))).unwrap();
+        assert_eq!((x, y), (250, 200));
+    }
+
+    #[test]
+    fn test_cell_to_screen_coords_density_comes_from_image() {
+        // Auto density must come from the image the agent looked at
+        // (auto_grid(800,600) = (16,9)), not from the bounds
+        // (auto_grid(400,300) = (10,7)) — otherwise cell labels name
+        // different regions in the screenshot and the click.
+        // Image space: cell = 50x66; B2 center = (75, 99).
+        // Mapped to bounds at origin: (75 * 400/800, 99 * 300/600) = (37, 49).
+        let (x, y) = cell_to_screen_coords("B2", 800, 600, 0, 0, 400, 300, None).unwrap();
+        assert_eq!((x, y), (37, 49));
     }
 
     #[test]

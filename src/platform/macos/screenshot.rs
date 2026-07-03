@@ -4,7 +4,12 @@ use super::ffi::*;
 use super::windows;
 
 pub fn screenshot_full(output: &str) -> Result<String, String> {
-    let image = capture_screen(kCGWindowListOptionOnScreenOnly, kCGNullWindowID, CGRect::null())?;
+    let image = capture_screen(
+        kCGWindowListOptionOnScreenOnly,
+        kCGNullWindowID,
+        CGRect::null(),
+        kCGWindowImageDefault,
+    )?;
     let img = extract_pixels(image)?;
     unsafe { CFRelease(image); }
 
@@ -19,11 +24,14 @@ pub fn screenshot_window(title: &str, output: &str) -> Result<String, String> {
     let (win_id, win_json) = windows::find_window_by_title(title)?
         .ok_or_else(|| format!("No window found matching '{}'", title))?;
 
-    // Capture just this window — macOS crops natively
+    // Capture just this window — macOS crops natively. Ignore framing effects
+    // (the drop shadow) so the image corresponds exactly to kCGWindowBounds;
+    // otherwise every grid cell is offset by the shadow margin.
     let image = capture_screen(
         kCGWindowListOptionIncludingWindow,
         win_id,
         CGRect::null(),
+        kCGWindowImageBoundsIgnoreFraming,
     )?;
     let img = extract_pixels(image)?;
     unsafe { CFRelease(image); }
@@ -41,11 +49,13 @@ pub fn screenshot_window_by_id(id: u64, output: &str) -> Result<String, String> 
     windows::raise_window(id)?;
     std::thread::sleep(std::time::Duration::from_millis(300));
 
-    // Capture just this window — macOS crops natively
+    // Capture just this window — macOS crops natively, ignoring the drop
+    // shadow so the image corresponds exactly to kCGWindowBounds.
     let image = capture_screen(
         kCGWindowListOptionIncludingWindow,
         id as u32,
         CGRect::null(),
+        kCGWindowImageBoundsIgnoreFraming,
     )?;
     let img = extract_pixels(image)?;
     unsafe { CFRelease(image); }
@@ -57,13 +67,13 @@ pub fn screenshot_window_by_id(id: u64, output: &str) -> Result<String, String> 
     ]))
 }
 
-fn capture_screen(list_option: u32, window_id: u32, bounds: CGRect) -> Result<*mut c_void, String> {
+fn capture_screen(list_option: u32, window_id: u32, bounds: CGRect, image_option: u32) -> Result<*mut c_void, String> {
     unsafe {
         let image = CGWindowListCreateImage(
             bounds,
             list_option,
             window_id,
-            kCGWindowImageDefault,
+            image_option,
         );
         if image.is_null() {
             return Err("Failed to capture screen image".to_string());

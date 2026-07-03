@@ -103,11 +103,21 @@ fn main() {
     }
 }
 
+/// A window resolved from --window/--window-id flags: its id, bounds, and the
+/// cache key identifying screenshots captured from it.
+#[derive(Debug)]
+struct WindowTarget {
+    id: u64,
+    x: i32,
+    y: i32,
+    w: u32,
+    h: u32,
+    cache_key: String,
+}
+
 /// Pre-parse args to extract --window and --window-id flags.
-/// Returns (remaining_args, Option<(id, x, y, w, h)>).
 /// If a window flag is present, raises the window and sleeps for focus.
-#[allow(clippy::type_complexity)]
-fn extract_window_flags(args: &[String]) -> Result<(Vec<String>, Option<(u64, i32, i32, u32, u32)>), String> {
+fn extract_window_flags(args: &[String]) -> Result<(Vec<String>, Option<WindowTarget>), String> {
     let mut remaining = Vec::new();
     let mut window_title: Option<String> = None;
     let mut window_id: Option<u64> = None;
@@ -155,10 +165,28 @@ fn extract_window_flags(args: &[String]) -> Result<(Vec<String>, Option<(u64, i3
         platform::raise_window(id)?;
         std::thread::sleep(std::time::Duration::from_millis(200));
         let (x, y, w, h) = platform::get_window_bounds(id)?;
-        Ok((remaining, Some((id, x, y, w, h))))
+        let cache_key = cache_target_key(&window_title, window_id);
+        Ok((remaining, Some(WindowTarget { id, x, y, w, h, cache_key })))
     } else {
         Ok((remaining, None))
     }
+}
+
+/// Dimensions of the image a cell reference was computed against: the cached
+/// screenshot of this exact target if fresh, else a fresh capture (stored in
+/// the cache). Falls back to the window bounds (1:1) only if capturing fails,
+/// since without any image the bounds are the only frame there is.
+fn click_reference_dims(target: &WindowTarget) -> (u32, u32) {
+    if cache_is_fresh(&target.cache_key)
+        && let Ok(dims) = platform::png::read_png_dimensions(&cache_path()) {
+            return dims;
+    }
+    if platform::screenshot_window_by_id(target.id, &cache_path()).is_ok()
+        && let Ok(dims) = platform::png::read_png_dimensions(&cache_path()) {
+            let _ = std::fs::write(cache_meta_path(), &target.cache_key);
+            return dims;
+    }
+    (target.w, target.h)
 }
 
 /// Sidecar file recording which capture target the cached screenshot came from.
@@ -476,10 +504,16 @@ fn cmd_mouse(args: &[String]) -> Result<String, String> {
     match subcmd {
         "click" => {
             if let Some(cell_ref) = &cell {
-                // Cell-based click — move to cell center and click in one operation
-                let (_, wx, wy, ww, wh) = window_info
+                // Cell-based click — move to cell center and click in one operation.
+                // Grid math runs in the pixel space of the screenshot the agent
+                // looked at, then maps onto the window bounds, so cell labels mean
+                // the same region on every display scale.
+                let target = window_info
                     .ok_or("--cell requires --window or --window-id to know the target window")?;
-                let (x, y) = grid::cell_to_coords(cell_ref, wx, wy, ww, wh, explicit_grid)?;
+                let (img_w, img_h) = click_reference_dims(&target);
+                let (x, y) = grid::cell_to_screen_coords(
+                    cell_ref, img_w, img_h, target.x, target.y, target.w, target.h, explicit_grid,
+                )?;
                 platform::mouse_move(x, y)?;
                 std::thread::sleep(std::time::Duration::from_millis(50));
             }
