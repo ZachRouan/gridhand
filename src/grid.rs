@@ -115,6 +115,12 @@ fn cell_chain_center(
         // which uses u32 division. Float division would drift 1-3px per zoom level.
         let cell_w_int = (w as u32) / grid_cols;
         let cell_h_int = (h as u32) / grid_rows;
+        if cell_w_int == 0 || cell_h_int == 0 {
+            return Err(format!(
+                "Zoom chain '{}' is too deep: cell size reaches zero at level {}. Use fewer levels.",
+                cell_chain, i + 1
+            ));
+        }
         let cell_w = cell_w_int as f64;
         let cell_h = cell_h_int as f64;
 
@@ -126,8 +132,11 @@ fn cell_chain_center(
                     part, grid_cols, grid_rows
                 ));
             }
-            x += (col1 + col2) as f64 / 2.0 * cell_w;
-            y += (row1 + row2) as f64 / 2.0 * cell_h;
+            // Integer midpoint with clamping, matching the screenshot crop loop
+            let mid_x = ((col1 + col2) * cell_w_int / 2).min((w as u32).saturating_sub(cell_w_int));
+            let mid_y = ((row1 + row2) * cell_h_int / 2).min((h as u32).saturating_sub(cell_h_int));
+            x += mid_x as f64;
+            y += mid_y as f64;
         } else {
             let (col, row) = parse_cell_ref(part)?;
             if col >= grid_cols || row >= grid_rows {
@@ -342,6 +351,27 @@ mod tests {
         // Mapped to bounds at origin: (75 * 400/800, 99 * 300/600) = (37, 49).
         let (x, y) = cell_to_screen_coords("B2", 800, 600, 0, 0, 400, 300, None).unwrap();
         assert_eq!((x, y), (37, 49));
+    }
+
+    #[test]
+    fn test_zoom_chain_too_deep_errors() {
+        // By the 4th level the cell size reaches zero. Both the screenshot
+        // crop and the click must report "too deep" — previously the
+        // screenshot errored opaquely while the click silently fired at a
+        // degenerate point.
+        let result = cell_to_screen_coords("A1.A1.A1.A1", 1280, 800, 0, 0, 1280, 800, None);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("deep"), "error should say the chain is too deep");
+    }
+
+    #[test]
+    fn test_between_cell_midpoint_matches_crop_math() {
+        // Odd cell width: integer midpoint math must match the crop loop
+        // (which floors), not keep the exact .5.
+        // 810x600, 8x6 grid -> cell 101x100. D3+E3: (3+4)*101/2 = 353 (floored).
+        // Center: 353 + 101/2 = 403.5 -> 403.
+        let (x, _) = cell_to_screen_coords("D3+E3", 810, 600, 0, 0, 810, 600, Some((8, 6))).unwrap();
+        assert_eq!(x, 403);
     }
 
     #[test]

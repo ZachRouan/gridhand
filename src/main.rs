@@ -352,6 +352,12 @@ fn cmd_screenshot(args: &[String]) -> Result<String, String> {
                 };
                 let cell_w = img.width / cols;
                 let cell_h = img.height / rows;
+                if cell_w == 0 || cell_h == 0 {
+                    return Err(format!(
+                        "Zoom chain '{}' is too deep: cell size reaches zero at level {}. Use fewer levels.",
+                        cell_chain, level + 1
+                    ));
+                }
 
                 // Parse cell reference — single cell (D3) or between two cells (D3+E3)
                 let (cx, cy, single_cell) = if part.contains('+') {
@@ -413,11 +419,6 @@ fn cmd_screenshot(args: &[String]) -> Result<String, String> {
             let gr = grid.unwrap_or_else(|| grid::auto_grid_zoom(stw, sth));
             platform::png::draw_grid_in_region(&mut img, gr.0, gr.1, sox, soy, stw, sth);
             gr
-        } else if cell.is_some() {
-            img = platform::png::scale_up(&img, ZOOM_MIN_WIDTH, ZOOM_MIN_HEIGHT);
-            let gr = grid.unwrap_or_else(|| grid::auto_grid(img.width, img.height));
-            platform::png::draw_grid(&mut img, gr.0, gr.1);
-            gr
         } else {
             let gr = grid.unwrap_or_else(|| grid::auto_grid(img.width, img.height));
             platform::png::draw_grid(&mut img, gr.0, gr.1);
@@ -458,87 +459,69 @@ fn cmd_windows(args: &[String]) -> Result<String, String> {
     }
 }
 
+/// Parse `mouse click` arguments strictly. Unknown arguments and malformed
+/// flag values are errors: a silently dropped --grid clicks a different pixel
+/// than the grid the agent computed against, and a stray word must not
+/// quietly become the button.
+fn parse_mouse_click_args(args: &[String]) -> Result<(Option<String>, Option<(u32, u32)>, String), String> {
+    let mut cell: Option<String> = None;
+    let mut grid: Option<(u32, u32)> = None;
+    let mut button = "left".to_string();
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--cell" => {
+                i += 1;
+                cell = Some(args.get(i).ok_or("--cell requires a cell reference")?.clone());
+            }
+            "--grid" => {
+                i += 1;
+                let val = args.get(i).ok_or("--grid requires a WxH value (e.g., 8x6)")?;
+                grid = Some(grid::parse_grid(val)?);
+            }
+            "--button" => {
+                i += 1;
+                button = args.get(i).ok_or("--button requires a value (left|right)")?.clone();
+            }
+            other => return Err(format!("Unknown argument: {}. Try 'gui-tool --help'", other)),
+        }
+        i += 1;
+    }
+    Ok((cell, grid, button))
+}
+
 fn cmd_mouse(args: &[String]) -> Result<String, String> {
     if args.is_empty() {
         return Err("Usage: gui-tool mouse click [--cell <ref>] [--window-id <id>] [--button left|right]".to_string());
     }
 
+    // Validate the subcommand before extract_window_flags raises anything
     let subcmd = args[0].as_str();
-    let sub_args = &args[1..];
-
-    // Extract window flags (also extracts --grid and --cell from remaining)
-    let (remaining, window_info) = extract_window_flags(sub_args)?;
-
-    // Extract --cell and --grid from remaining args
-    let mut positional = Vec::new();
-    let mut cell: Option<String> = None;
-    let mut explicit_grid: Option<(u32, u32)> = None;
-    let mut i = 0;
-    while i < remaining.len() {
-        match remaining[i].as_str() {
-            "--cell" => {
-                i += 1;
-                cell = Some(remaining.get(i).ok_or("--cell requires a cell reference")?.clone());
-            }
-            "--grid" => {
-                if let Some(next) = remaining.get(i + 1)
-                    && !next.starts_with('-') && next.contains('x') {
-                        explicit_grid = Some(grid::parse_grid(next)?);
-                        i += 1;
-                    }
-            }
-            "--button" => {
-                positional.push(remaining[i].clone());
-                i += 1;
-                if let Some(val) = remaining.get(i) {
-                    positional.push(val.clone());
-                }
-            }
-            _ => {
-                positional.push(remaining[i].clone());
-            }
-        }
-        i += 1;
+    if subcmd != "click" {
+        return Err(format!("Unknown mouse subcommand: {}", subcmd));
     }
 
-    match subcmd {
-        "click" => {
-            if let Some(cell_ref) = &cell {
-                // Cell-based click — move to cell center and click in one operation.
-                // Grid math runs in the pixel space of the screenshot the agent
-                // looked at, then maps onto the window bounds, so cell labels mean
-                // the same region on every display scale.
-                let target = window_info
-                    .ok_or("--cell requires --window or --window-id to know the target window")?;
-                let (img_w, img_h) = click_reference_dims(&target);
-                let (x, y) = grid::cell_to_screen_coords(
-                    cell_ref, img_w, img_h, target.x, target.y, target.w, target.h, explicit_grid,
-                )?;
-                platform::mouse_move(x, y)?;
-                std::thread::sleep(std::time::Duration::from_millis(50));
-            }
-            let mut button = "left";
-            let mut j = 0;
-            while j < positional.len() {
-                match positional[j].as_str() {
-                    "--button" => {
-                        j += 1;
-                        if let Some(b) = positional.get(j) {
-                            button = b.as_str();
-                        }
-                    }
-                    other => {
-                        button = other;
-                    }
-                }
-                j += 1;
-            }
-            let result = platform::mouse_click(button);
-            invalidate_cache();
-            result
-        }
-        _ => Err(format!("Unknown mouse subcommand: {}", subcmd)),
+    let (remaining, window_info) = extract_window_flags(&args[1..])?;
+    let (cell, explicit_grid, button) = parse_mouse_click_args(&remaining)?;
+
+    if let Some(cell_ref) = &cell {
+        // Cell-based click — move to cell center and click in one operation.
+        // Grid math runs in the pixel space of the screenshot the agent
+        // looked at, then maps onto the window bounds, so cell labels mean
+        // the same region on every display scale.
+        let target = window_info
+            .ok_or("--cell requires --window or --window-id to know the target window")?;
+        let (img_w, img_h) = click_reference_dims(&target);
+        let (x, y) = grid::cell_to_screen_coords(
+            cell_ref, img_w, img_h, target.x, target.y, target.w, target.h, explicit_grid,
+        )?;
+        platform::mouse_move(x, y)?;
+        std::thread::sleep(std::time::Duration::from_millis(50));
     }
+
+    let result = platform::mouse_click(&button);
+    invalidate_cache();
+    result
 }
 
 fn cmd_key(args: &[String]) -> Result<String, String> {
@@ -546,11 +529,21 @@ fn cmd_key(args: &[String]) -> Result<String, String> {
         return Err("Usage: gui-tool key <type|press> [args...]".to_string());
     }
 
+    // Validate the subcommand before extract_window_flags raises anything
     let subcmd = args[0].as_str();
-    let sub_args = &args[1..];
+    if subcmd != "type" && subcmd != "press" {
+        return Err(format!("Unknown key subcommand: {}", subcmd));
+    }
 
     // Extract window flags from the remaining args
-    let (remaining, _window_info) = extract_window_flags(sub_args)?;
+    let (remaining, _window_info) = extract_window_flags(&args[1..])?;
+
+    if remaining.len() > 1 {
+        return Err(format!(
+            "key {} takes a single argument — quote multi-word text (e.g. \"Hello World\")",
+            subcmd
+        ));
+    }
 
     match subcmd {
         "type" => {
@@ -567,7 +560,7 @@ fn cmd_key(args: &[String]) -> Result<String, String> {
             invalidate_cache();
             result
         }
-        _ => Err(format!("Unknown key subcommand: {}", subcmd)),
+        _ => unreachable!(),
     }
 }
 
@@ -692,6 +685,54 @@ mod tests {
     fn test_mouse_no_args() {
         let result = cmd_mouse(&[]);
         assert!(result.is_err());
+    }
+
+    fn args(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn test_mouse_grid_requires_value() {
+        // --grid with a missing or malformed value must error, not silently
+        // fall back to auto density (which clicks a different pixel than the
+        // grid the agent computed against).
+        assert!(parse_mouse_click_args(&args(&["--cell", "B2", "--grid"])).is_err());
+        assert!(parse_mouse_click_args(&args(&["--cell", "B2", "--grid", "4X3"])).is_err());
+        assert!(parse_mouse_click_args(&args(&["--cell", "B2", "--grid", "--button"])).is_err());
+    }
+
+    #[test]
+    fn test_mouse_rejects_stray_positionals() {
+        // A stray word must be an unknown-argument error, not the button
+        assert!(parse_mouse_click_args(&args(&["lefft"])).is_err());
+        assert!(parse_mouse_click_args(&args(&["B2"])).is_err());
+    }
+
+    #[test]
+    fn test_mouse_button_requires_value() {
+        assert!(parse_mouse_click_args(&args(&["--button"])).is_err());
+    }
+
+    #[test]
+    fn test_mouse_valid_args_parse() {
+        let (cell, grid, button) =
+            parse_mouse_click_args(&args(&["--cell", "B2", "--grid", "8x6", "--button", "right"])).unwrap();
+        assert_eq!(cell.as_deref(), Some("B2"));
+        assert_eq!(grid, Some((8, 6)));
+        assert_eq!(button, "right");
+        // Defaults
+        let (cell, grid, button) = parse_mouse_click_args(&[]).unwrap();
+        assert_eq!(cell, None);
+        assert_eq!(grid, None);
+        assert_eq!(button, "left");
+    }
+
+    #[test]
+    fn test_key_type_rejects_extra_args() {
+        // Unquoted multi-word text must error instead of typing only "Hello"
+        let result = cmd_key(&args(&["type", "Hello", "World"]));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("quote"), "error should hint at quoting");
     }
 
     #[test]
