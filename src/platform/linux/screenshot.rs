@@ -193,24 +193,68 @@ fn take_portal_screenshot(conn: &mut DbusConnection) -> Result<String, String> {
 
 fn uri_to_path(uri: &str) -> Result<String, String> {
     if let Some(path) = uri.strip_prefix("file://") {
-        Ok(url_decode(path))
+        url_decode(path)
     } else {
         Err(format!("Unexpected URI format: {}", uri))
     }
 }
 
-fn url_decode(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    let mut chars = s.chars();
-    while let Some(c) = chars.next() {
-        if c == '%' {
-            let hex: String = chars.by_ref().take(2).collect();
-            if let Ok(byte) = u8::from_str_radix(&hex, 16) {
-                result.push(byte as char);
+/// Percent-decode a URI path. Escapes are UTF-8 *bytes*, so they must be
+/// collected into a byte buffer and validated as UTF-8 — decoding each byte
+/// as a char mangles multibyte characters ("%C3%A9" would become "Ã©" and
+/// GNOME's localized screenshot paths would stop resolving). Malformed
+/// escapes pass through literally rather than swallowing characters.
+fn url_decode(s: &str) -> Result<String, String> {
+    let bytes = s.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len()
+            && let (Some(hi), Some(lo)) = (
+                (bytes[i + 1] as char).to_digit(16),
+                (bytes[i + 2] as char).to_digit(16),
+            ) {
+                out.push((hi * 16 + lo) as u8);
+                i += 3;
+                continue;
             }
-        } else {
-            result.push(c);
-        }
+        out.push(bytes[i]);
+        i += 1;
     }
-    result
+    String::from_utf8(out).map_err(|_| format!("URI is not valid UTF-8 after decoding: {}", s))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_url_decode_utf8() {
+        // GNOME saves screenshots under localized directory names; percent
+        // escapes are UTF-8 bytes and must decode as such, not as Latin-1
+        // chars ("%C3%A9" is 'é', not "Ã©").
+        assert_eq!(
+            url_decode("/home/z/Images/Captures%20d%27%C3%A9cran/s.png").unwrap(),
+            "/home/z/Images/Captures d'écran/s.png"
+        );
+    }
+
+    #[test]
+    fn test_url_decode_plain_ascii() {
+        assert_eq!(url_decode("/tmp/shot.png").unwrap(), "/tmp/shot.png");
+        assert_eq!(url_decode("/tmp/a%20b.png").unwrap(), "/tmp/a b.png");
+    }
+
+    #[test]
+    fn test_url_decode_invalid_sequences_pass_through() {
+        // A malformed escape must not swallow the following characters
+        assert_eq!(url_decode("/a%2").unwrap(), "/a%2");
+        assert_eq!(url_decode("/a%zzb").unwrap(), "/a%zzb");
+    }
+
+    #[test]
+    fn test_uri_to_path() {
+        assert_eq!(uri_to_path("file:///tmp/s.png").unwrap(), "/tmp/s.png");
+        assert!(uri_to_path("http://example.com/s.png").is_err());
+    }
 }
