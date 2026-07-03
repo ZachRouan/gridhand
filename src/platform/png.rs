@@ -133,6 +133,22 @@ fn decode_png(data: &[u8]) -> Result<Image, String> {
             return Err("PNG chunk extends past end of file".to_string());
         }
 
+        // Validate the chunk CRC (type + payload) so corrupted files are
+        // rejected instead of decoded into garbage.
+        let stored_crc = u32::from_be_bytes([
+            data[chunk_data_end], data[chunk_data_end + 1],
+            data[chunk_data_end + 2], data[chunk_data_end + 3],
+        ]);
+        let mut crc_input = Vec::with_capacity(4 + chunk_len);
+        crc_input.extend_from_slice(chunk_type);
+        crc_input.extend_from_slice(&data[chunk_data_start..chunk_data_end]);
+        if crc32(&crc_input) != stored_crc {
+            return Err(format!(
+                "PNG chunk {} has a bad CRC (corrupted file)",
+                String::from_utf8_lossy(chunk_type)
+            ));
+        }
+
         match chunk_type {
             b"IHDR" => {
                 if chunk_len < 13 {
@@ -369,6 +385,23 @@ impl HuffmanTable {
             return Ok(HuffmanTable { table: vec![0; 1], max_bits: 0 });
         }
         let max_bits = max_bits.min(MAX_HUFFMAN_BITS);
+
+        // Reject over-subscribed code lengths (Kraft inequality): building a
+        // table from them silently overwrites entries and decodes garbage.
+        // Incomplete codes are permitted — deflate produces them legitimately
+        // (e.g. a single distance code) and unused lookups already error.
+        let mut kraft: u64 = 0;
+        for &len in lengths {
+            if len > MAX_HUFFMAN_BITS {
+                return Err(format!("Huffman code length {} exceeds maximum {}", len, MAX_HUFFMAN_BITS));
+            }
+            if len > 0 {
+                kraft += 1u64 << (MAX_HUFFMAN_BITS - len);
+            }
+        }
+        if kraft > 1u64 << MAX_HUFFMAN_BITS {
+            return Err("Over-subscribed Huffman code lengths".to_string());
+        }
 
         let mut bl_count = [0u32; 16];
         for &len in lengths {
@@ -1446,6 +1479,31 @@ mod tests {
         write_chunk(&mut data, b"IDAT", &zlib_compress(&[0u8; 64]));
         write_chunk(&mut data, b"IEND", &[]);
         data
+    }
+
+    #[test]
+    fn test_png_corrupt_chunk_crc_rejected() {
+        let img = Image { width: 4, height: 4, bpp: 3, pixels: vec![7u8; 4 * 4 * 3] };
+        let mut data = encode_png(&img).unwrap();
+        // Corrupt the IDAT chunk's CRC field itself: the payload stays valid,
+        // so only actual CRC validation can catch this.
+        let idat_pos = data.windows(4).position(|w| w == b"IDAT").unwrap();
+        let chunk_len = u32::from_be_bytes([
+            data[idat_pos - 4], data[idat_pos - 3], data[idat_pos - 2], data[idat_pos - 1],
+        ]) as usize;
+        let crc_pos = idat_pos + 4 + chunk_len;
+        data[crc_pos] ^= 0xFF;
+        assert!(decode_png(&data).is_err(), "bad chunk CRC must be rejected");
+    }
+
+    #[test]
+    fn test_oversubscribed_huffman_lengths_rejected() {
+        // Three codes of length 1 cannot form a valid prefix code
+        assert!(HuffmanTable::from_lengths(&[1, 1, 1]).is_err());
+        // A complete code must still build
+        assert!(HuffmanTable::from_lengths(&[1, 2, 2]).is_ok());
+        // Fixed tables (incomplete by spec: 288 symbols) must keep working
+        let _ = build_fixed_lit_table();
     }
 
     #[test]
