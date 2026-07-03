@@ -134,6 +134,9 @@ fn decode_png(data: &[u8]) -> Result<Image, String> {
                 if color_type != 2 && color_type != 6 {
                     return Err(format!("Only RGB(2) and RGBA(6) color types supported, got {}", color_type));
                 }
+                if width == 0 || height == 0 {
+                    return Err(format!("Invalid PNG dimensions {}x{}", width, height));
+                }
             }
             b"IDAT" => {
                 idat_chunks.push(&data[chunk_data_start..chunk_data_end]);
@@ -156,13 +159,20 @@ fn decode_png(data: &[u8]) -> Result<Image, String> {
         idat_data.extend_from_slice(chunk);
     }
 
-    // Decompress zlib stream
-    let raw = zlib_decompress(&idat_data)?;
+    // Validate declared geometry before allocating anything. u128 math cannot
+    // overflow for u32 dimensions, and the ceiling bounds both the pixel
+    // buffer and the decompression output (1 GiB covers four 8K displays).
+    const MAX_DECODED_BYTES: u128 = 1 << 30;
+    let bpp: u32 = if color_type == 2 { 3 } else { 4 };
+    let expected_bytes = height as u128 * (1 + width as u128 * bpp as u128); // 1 filter byte per row
+    if expected_bytes > MAX_DECODED_BYTES {
+        return Err(format!("PNG dimensions {}x{} exceed the decode size limit", width, height));
+    }
+    let stride = width as usize * bpp as usize;
+    let expected = expected_bytes as usize;
+    let raw = zlib_decompress(&idat_data, expected)?;
 
     // Unfilter
-    let bpp: u32 = if color_type == 2 { 3 } else { 4 };
-    let stride = width as usize * bpp as usize;
-    let expected = height as usize * (1 + stride); // 1 byte filter per row
     if raw.len() < expected {
         return Err(format!("Decompressed data too short: {} < {}", raw.len(), expected));
     }
@@ -226,7 +236,10 @@ fn decode_png(data: &[u8]) -> Result<Image, String> {
 // Zlib / Inflate decompression (RFC 1950 / RFC 1951)
 // ---------------------------------------------------------------------------
 
-fn zlib_decompress(data: &[u8]) -> Result<Vec<u8>, String> {
+/// Decompress a zlib stream, refusing to produce more than `max_out` bytes.
+/// The cap defends against decompression bombs: a few KB of crafted input can
+/// otherwise expand to gigabytes before any dimension check runs.
+fn zlib_decompress(data: &[u8], max_out: usize) -> Result<Vec<u8>, String> {
     if data.len() < 6 {
         return Err("Zlib data too short".to_string());
     }
@@ -237,20 +250,27 @@ fn zlib_decompress(data: &[u8]) -> Result<Vec<u8>, String> {
         return Err(format!("Unsupported zlib compression method: {}", cm));
     }
     // Ignore checksum at end (4 bytes)
-    inflate(&data[2..data.len() - 4])
+    inflate(&data[2..data.len() - 4], max_out)
 }
 
 /// Bit reader for the inflate stream.
+///
+/// `ensure_bits` may buffer zero bytes past the end of input so that Huffman
+/// lookahead near the end of the stream works, but *consuming* bits past the
+/// real input is an error — otherwise a truncated stream decodes an endless
+/// run of phantom blocks and inflate never terminates.
 struct BitReader<'a> {
     data: &'a [u8],
-    pos: usize,      // byte position
+    pos: usize,      // byte position (may pass data.len() for lookahead)
     bit_buf: u32,
     bits_in: u8,
+    consumed: usize, // bits consumed from the stream so far
+    limit: usize,    // total real bits available
 }
 
 impl<'a> BitReader<'a> {
     fn new(data: &'a [u8]) -> Self {
-        BitReader { data, pos: 0, bit_buf: 0, bits_in: 0 }
+        BitReader { data, pos: 0, bit_buf: 0, bits_in: 0, consumed: 0, limit: data.len() * 8 }
     }
 
     fn ensure_bits(&mut self, n: u8) {
@@ -262,39 +282,42 @@ impl<'a> BitReader<'a> {
         }
     }
 
-    fn read_bits(&mut self, n: u8) -> u32 {
-        self.ensure_bits(n);
-        let val = self.bit_buf & ((1u32 << n) - 1);
+    /// Consume n buffered bits, erroring if that runs past the real input.
+    fn consume(&mut self, n: u8) -> Result<(), String> {
         self.bit_buf >>= n;
         self.bits_in -= n;
-        val
+        self.consumed += n as usize;
+        if self.consumed > self.limit {
+            return Err("Unexpected end of compressed data".to_string());
+        }
+        Ok(())
     }
 
-    #[allow(dead_code)]
-    fn read_bits_rev(&mut self, n: u8) -> u32 {
-        // Read n bits and reverse them (for Huffman codes which are MSB-first)
-        let val = self.read_bits(n);
-        reverse_bits(val, n)
+    fn read_bits(&mut self, n: u8) -> Result<u32, String> {
+        self.ensure_bits(n);
+        let val = self.bit_buf & ((1u32 << n) - 1);
+        self.consume(n)?;
+        Ok(val)
     }
 
     /// Align to next byte boundary (discard remaining bits in current byte).
-    fn align_byte(&mut self) {
+    fn align_byte(&mut self) -> Result<(), String> {
         let discard = self.bits_in % 8;
         if discard > 0 {
-            self.bit_buf >>= discard;
-            self.bits_in -= discard;
+            self.consume(discard)?;
         }
+        Ok(())
     }
 
-    fn read_byte(&mut self) -> u8 {
-        self.align_byte();
-        self.read_bits(8) as u8
+    fn read_byte(&mut self) -> Result<u8, String> {
+        self.align_byte()?;
+        Ok(self.read_bits(8)? as u8)
     }
 
-    fn read_u16_le(&mut self) -> u16 {
-        let lo = self.read_byte() as u16;
-        let hi = self.read_byte() as u16;
-        lo | (hi << 8)
+    fn read_u16_le(&mut self) -> Result<u16, String> {
+        let lo = self.read_byte()? as u16;
+        let hi = self.read_byte()? as u16;
+        Ok(lo | (hi << 8))
     }
 }
 
@@ -377,8 +400,7 @@ impl HuffmanTable {
             return Err("Invalid Huffman code".to_string());
         }
         let sym = entry & 0xFFFF;
-        reader.bit_buf >>= len;
-        reader.bits_in -= len as u8;
+        reader.consume(len as u8)?;
         Ok(sym)
     }
 }
@@ -408,31 +430,37 @@ static DIST_EXTRA: [u8; 30] = [
     9, 9, 10, 10, 11, 11, 12, 12, 13, 13,
 ];
 
-fn inflate(data: &[u8]) -> Result<Vec<u8>, String> {
+fn inflate(data: &[u8], max_out: usize) -> Result<Vec<u8>, String> {
     let mut reader = BitReader::new(data);
     let mut output = Vec::new();
 
     loop {
-        let bfinal = reader.read_bits(1);
-        let btype = reader.read_bits(2);
+        let bfinal = reader.read_bits(1)?;
+        let btype = reader.read_bits(2)?;
 
         match btype {
             0 => {
                 // Stored block
-                reader.align_byte();
-                let len = reader.read_u16_le();
-                let _nlen = reader.read_u16_le();
+                reader.align_byte()?;
+                let len = reader.read_u16_le()?;
+                let nlen = reader.read_u16_le()?;
+                if len != !nlen {
+                    return Err("Corrupt stored block: LEN/NLEN mismatch".to_string());
+                }
+                if output.len() + len as usize > max_out {
+                    return Err(format!("Decompressed data exceeds expected size {}", max_out));
+                }
                 for _ in 0..len {
-                    output.push(reader.read_byte());
+                    output.push(reader.read_byte()?);
                 }
             }
             1 => {
                 // Fixed Huffman
-                inflate_block_huffman(&mut reader, &mut output, true)?;
+                inflate_block_huffman(&mut reader, &mut output, true, max_out)?;
             }
             2 => {
                 // Dynamic Huffman
-                inflate_block_huffman(&mut reader, &mut output, false)?;
+                inflate_block_huffman(&mut reader, &mut output, false, max_out)?;
             }
             3 => return Err("Invalid deflate block type 3".to_string()),
             _ => unreachable!(),
@@ -460,7 +488,7 @@ fn build_fixed_dist_table() -> HuffmanTable {
     HuffmanTable::from_lengths(&lengths).unwrap()
 }
 
-fn inflate_block_huffman(reader: &mut BitReader, output: &mut Vec<u8>, fixed: bool) -> Result<(), String> {
+fn inflate_block_huffman(reader: &mut BitReader, output: &mut Vec<u8>, fixed: bool, max_out: usize) -> Result<(), String> {
     let (lit_table, dist_table) = if fixed {
         (build_fixed_lit_table(), build_fixed_dist_table())
     } else {
@@ -471,6 +499,9 @@ fn inflate_block_huffman(reader: &mut BitReader, output: &mut Vec<u8>, fixed: bo
         let sym = lit_table.decode(reader)?;
 
         if sym < 256 {
+            if output.len() >= max_out {
+                return Err(format!("Decompressed data exceeds expected size {}", max_out));
+            }
             output.push(sym as u8);
         } else if sym == 256 {
             break; // end of block
@@ -481,17 +512,20 @@ fn inflate_block_huffman(reader: &mut BitReader, output: &mut Vec<u8>, fixed: bo
                 return Err(format!("Invalid length code: {}", sym));
             }
             let length = LENGTH_BASE[len_idx] as usize
-                + reader.read_bits(LENGTH_EXTRA[len_idx]) as usize;
+                + reader.read_bits(LENGTH_EXTRA[len_idx])? as usize;
 
             let dist_sym = dist_table.decode(reader)? as usize;
             if dist_sym >= DIST_BASE.len() {
                 return Err(format!("Invalid distance code: {}", dist_sym));
             }
             let distance = DIST_BASE[dist_sym] as usize
-                + reader.read_bits(DIST_EXTRA[dist_sym]) as usize;
+                + reader.read_bits(DIST_EXTRA[dist_sym])? as usize;
 
             if distance > output.len() {
                 return Err(format!("Distance {} exceeds output size {}", distance, output.len()));
+            }
+            if output.len() + length > max_out {
+                return Err(format!("Decompressed data exceeds expected size {}", max_out));
             }
 
             let start = output.len() - distance;
@@ -511,14 +545,14 @@ static CODELEN_ORDER: [usize; 19] = [
 ];
 
 fn build_dynamic_tables(reader: &mut BitReader) -> Result<(HuffmanTable, HuffmanTable), String> {
-    let hlit = reader.read_bits(5) as usize + 257;
-    let hdist = reader.read_bits(5) as usize + 1;
-    let hclen = reader.read_bits(4) as usize + 4;
+    let hlit = reader.read_bits(5)? as usize + 257;
+    let hdist = reader.read_bits(5)? as usize + 1;
+    let hclen = reader.read_bits(4)? as usize + 4;
 
     // Read code length code lengths
     let mut codelen_lengths = [0u8; 19];
     for i in 0..hclen {
-        codelen_lengths[CODELEN_ORDER[i]] = reader.read_bits(3) as u8;
+        codelen_lengths[CODELEN_ORDER[i]] = reader.read_bits(3)? as u8;
     }
 
     let codelen_table = HuffmanTable::from_lengths(&codelen_lengths)?;
@@ -532,16 +566,16 @@ fn build_dynamic_tables(reader: &mut BitReader) -> Result<(HuffmanTable, Huffman
         match sym {
             0..=15 => lengths.push(sym as u8),
             16 => {
-                let repeat = reader.read_bits(2) as usize + 3;
+                let repeat = reader.read_bits(2)? as usize + 3;
                 let last = *lengths.last().ok_or("Code length 16 with no previous")?;
                 for _ in 0..repeat { lengths.push(last); }
             }
             17 => {
-                let repeat = reader.read_bits(3) as usize + 3;
+                let repeat = reader.read_bits(3)? as usize + 3;
                 lengths.resize(lengths.len() + repeat, 0);
             }
             18 => {
-                let repeat = reader.read_bits(7) as usize + 11;
+                let repeat = reader.read_bits(7)? as usize + 11;
                 lengths.resize(lengths.len() + repeat, 0);
             }
             _ => return Err(format!("Invalid code length symbol: {}", sym)),
@@ -1369,11 +1403,69 @@ mod tests {
     }
 
     #[test]
+    fn test_zlib_truncated_input_errors() {
+        // Valid zlib header but empty deflate body (only header + checksum bytes).
+        // The bit reader hits end-of-input immediately; this must be an error,
+        // not an infinite loop of zero-fed empty stored blocks.
+        let result = zlib_decompress(&[0x78, 0x9C, 0, 0, 0, 0], 1024);
+        assert!(result.is_err(), "truncated stream must error, got {:?}", result);
+
+        // A real stream cut off mid-block must also error, not hang.
+        let full = zlib_compress(&[7u8; 4096]);
+        let result = zlib_decompress(&full[..full.len() / 2], 8192);
+        assert!(result.is_err(), "mid-block truncation must error");
+    }
+
+    fn make_png_with_dims(width: u32, height: u32) -> Vec<u8> {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"\x89PNG\r\n\x1a\n");
+        let mut ihdr = Vec::new();
+        ihdr.extend_from_slice(&width.to_be_bytes());
+        ihdr.extend_from_slice(&height.to_be_bytes());
+        ihdr.extend_from_slice(&[8, 6, 0, 0, 0]); // depth 8, RGBA, no interlace
+        write_chunk(&mut data, b"IHDR", &ihdr);
+        write_chunk(&mut data, b"IDAT", &zlib_compress(&[0u8; 64]));
+        write_chunk(&mut data, b"IEND", &[]);
+        data
+    }
+
+    #[test]
+    fn test_png_absurd_dimensions_rejected() {
+        // Overflow case: 2^31 x 2^31 RGBA wraps the size arithmetic.
+        // Must be a clean error, not an overflow panic.
+        let result = decode_png(&make_png_with_dims(0x8000_0000, 0x8000_0000));
+        assert!(result.is_err(), "overflowing dimensions must error");
+
+        // Merely-huge case: 65535 x 65535 RGBA implies a ~17 GB buffer.
+        // Must be rejected up front, not attempted.
+        let result = decode_png(&make_png_with_dims(65535, 65535));
+        assert!(result.is_err(), "oversized dimensions must error");
+
+        // Zero dimensions must error with an accurate message.
+        let err = decode_png(&make_png_with_dims(0, 100)).err().expect("zero width must error");
+        assert!(err.contains("dimension"), "zero width must name the problem, got: {}", err);
+    }
+
+    #[test]
+    fn test_inflate_output_capped() {
+        // A stream that decompresses far beyond the caller's expected size
+        // must be rejected instead of ballooning memory.
+        let compressed = zlib_compress(&vec![0u8; 200_000]);
+        let result = zlib_decompress(&compressed, 1_000);
+        assert!(result.is_err(), "output beyond cap must error");
+
+        // An exact-size stream must still decompress.
+        let data = vec![42u8; 1_000];
+        let compressed = zlib_compress(&data);
+        assert_eq!(zlib_decompress(&compressed, 1_000).unwrap(), data);
+    }
+
+    #[test]
     fn test_inflate_stored() {
         // Manually create a zlib stored block: header + stored block with "hello"
         let input = b"hello";
         let zlib = zlib_stored(input);
-        let result = zlib_decompress(&zlib).unwrap();
+        let result = zlib_decompress(&zlib, 1024).unwrap();
         assert_eq!(result, input);
     }
 
