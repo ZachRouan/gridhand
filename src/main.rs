@@ -161,19 +161,53 @@ fn extract_window_flags(args: &[String]) -> Result<(Vec<String>, Option<(u64, i3
     }
 }
 
+/// Sidecar file recording which capture target the cached screenshot came from.
+fn cache_meta_path() -> String {
+    format!("{}.target", cache_path())
+}
+
+/// Identity of a capture target. The cache is only reusable for the exact
+/// target it was captured from — otherwise `--cell` would silently crop a
+/// different window's image (or a full-screen shot) and report success.
+fn cache_target_key(window_title: &Option<String>, window_id: Option<u64>) -> String {
+    if let Some(title) = window_title {
+        format!("title:{}", title)
+    } else if let Some(id) = window_id {
+        format!("id:{}", id)
+    } else {
+        "full".to_string()
+    }
+}
+
 /// Invalidate the screenshot cache (called after actions that change screen state).
 fn invalidate_cache() {
     let _ = std::fs::remove_file(cache_path());
+    let _ = std::fs::remove_file(cache_meta_path());
 }
 
-/// Check if the screenshot cache file exists and is recent enough to reuse.
-fn cache_is_fresh() -> bool {
-    if let Ok(meta) = std::fs::metadata(cache_path())
+/// Check if a cache file is recent enough to reuse and was captured from the
+/// same target as the current request.
+fn cache_fresh_at(png_path: &str, meta_path: &str, target_key: &str) -> bool {
+    match std::fs::read_to_string(meta_path) {
+        Ok(recorded) if recorded == target_key => {}
+        _ => return false,
+    }
+    if let Ok(meta) = std::fs::metadata(png_path)
         && let Ok(modified) = meta.modified()
             && let Ok(elapsed) = modified.elapsed() {
                 return elapsed.as_secs() < CACHE_MAX_AGE_SECS;
             }
     false
+}
+
+fn cache_is_fresh(target_key: &str) -> bool {
+    cache_fresh_at(&cache_path(), &cache_meta_path(), target_key)
+}
+
+/// Record a fresh capture in the cache along with the target it came from.
+fn write_cache(output: &str, target_key: &str) {
+    let _ = std::fs::copy(output, cache_path());
+    let _ = std::fs::write(cache_meta_path(), target_key);
 }
 
 fn cmd_screenshot(args: &[String]) -> Result<String, String> {
@@ -230,23 +264,27 @@ fn cmd_screenshot(args: &[String]) -> Result<String, String> {
     let output = output_path.as_deref().unwrap_or("/tmp/gui-tool-screenshot.png");
     validate::output_path(output)?;
 
-    // When zooming with --cell, try to reuse cached screenshot instead of taking a new one
-    let use_cache = cell.is_some() && cache_is_fresh();
+    // When zooming with --cell, reuse the cached screenshot — but only if it
+    // was captured from the same target this command names. A fresh capture of
+    // the requested target is always correct; a cached image of a different
+    // target never is.
+    let target_key = cache_target_key(&window_title, window_id);
+    let use_cache = cell.is_some() && cache_is_fresh(&target_key);
 
     let result = if use_cache {
         // Reuse cached screenshot — no new screenshot needed
         json::success_with(vec![("path", json::JsonValue::Str(output))])
     } else if let Some(title) = &window_title {
         let r = platform::screenshot_window(title, output)?;
-        let _ = std::fs::copy(output, cache_path());
+        write_cache(output, &target_key);
         r
     } else if let Some(id) = window_id {
         let r = platform::screenshot_window_by_id(id, output)?;
-        let _ = std::fs::copy(output, cache_path());
+        write_cache(output, &target_key);
         r
     } else {
         let r = platform::screenshot_full(output)?;
-        let _ = std::fs::copy(output, cache_path());
+        write_cache(output, &target_key);
         r
     };
 
@@ -383,7 +421,10 @@ fn cmd_windows(args: &[String]) -> Result<String, String> {
                 .ok_or("Usage: gui-tool windows raise <id>")?
                 .parse()
                 .map_err(|_| "Invalid window ID")?;
-            platform::raise_window(id)
+            let result = platform::raise_window(id);
+            // Raising changes what's on screen; a cached shot no longer matches.
+            invalidate_cache();
+            result
         }
         _ => Err(format!("Unknown windows subcommand: {}", args[0])),
     }
@@ -556,6 +597,40 @@ mod tests {
         let result = cmd_screenshot(&["--output".to_string(), "/tmp/test.jpg".to_string()]);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains(".png"));
+    }
+
+    #[test]
+    fn test_cache_target_keys_distinct() {
+        assert_ne!(cache_target_key(&None, None), cache_target_key(&None, Some(1)));
+        assert_ne!(cache_target_key(&Some("Firefox".to_string()), None), cache_target_key(&None, None));
+        assert_ne!(
+            cache_target_key(&Some("Firefox".to_string()), None),
+            cache_target_key(&Some("Terminal".to_string()), None)
+        );
+        assert_eq!(cache_target_key(&None, Some(7)), cache_target_key(&None, Some(7)));
+    }
+
+    #[test]
+    fn test_cache_fresh_requires_matching_target() {
+        let dir = std::env::temp_dir().join("gui-tool-test-cache");
+        let _ = std::fs::create_dir_all(&dir);
+        let png = dir.join("cache.png");
+        let meta = dir.join("cache.png.target");
+        std::fs::write(&png, b"fake").unwrap();
+        std::fs::write(&meta, "id:123").unwrap();
+        let png = png.to_str().unwrap();
+        let meta = meta.to_str().unwrap();
+
+        // Same target: fresh. Different target or full-screen: not reusable.
+        assert!(cache_fresh_at(png, meta, "id:123"));
+        assert!(!cache_fresh_at(png, meta, "id:456"));
+        assert!(!cache_fresh_at(png, meta, "full"));
+        assert!(!cache_fresh_at(png, meta, "title:Firefox"));
+
+        // Missing meta file (e.g. older cache): never reusable.
+        let _ = std::fs::remove_file(meta);
+        assert!(!cache_fresh_at(png, meta, "id:123"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
