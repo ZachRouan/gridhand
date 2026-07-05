@@ -2,7 +2,7 @@
 name = "gui-tool"
 version = "0.3.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.87"
 description = "Zero-dependency cross-platform CLI for GUI automation — screenshots, window management, mouse/keyboard, JSON in/out. Clicks by labeled grid cell: no pixel coordinates, no accessibility tree. Built for AI agents."
 authors = ["Zach Rouan <ZachRouan@gmail.com>"]
 license = "MIT"
