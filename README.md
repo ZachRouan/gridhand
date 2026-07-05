@@ -1,14 +1,45 @@
-# Agent Desktop Interface (`gui-tool`)
+<div align="center">
 
-`Linux` `macOS` `Windows` `Zero Dependencies`
+# Agent Desktop Interface — `gui-tool`
 
-Cross-platform Rust CLI for GUI automation — screenshots, window management, mouse/keyboard control, and strict JSON output. No dependencies, single binary, uses direct OS APIs.
+**Let an AI agent click any desktop app by naming a grid cell — not guessing pixels.**
 
-Built for AI desktop agents (Claude Code, Codex, Gemini CLI, etc.) but works fine as a general-purpose GUI automation tool.
+A cross-platform Rust CLI for GUI automation: screenshots, window management, mouse and keyboard control, strict JSON in / JSON out. **Zero dependencies** — no crates, one small binary, direct OS APIs.
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
+![Platforms](https://img.shields.io/badge/platform-Linux%20%C2%B7%20macOS%20%C2%B7%20Windows-informational?style=flat-square)
+![Zero dependencies](https://img.shields.io/badge/dependencies-0-success?style=flat-square)
+![Rust](https://img.shields.io/badge/Rust-std--only-orange?style=flat-square)
+[![GitHub stars](https://img.shields.io/github/stars/ZachRouan/agent-desktop-interface?style=flat-square)](https://github.com/ZachRouan/agent-desktop-interface/stargazers)
+
+<img src="assets/demo.gif" alt="gui-tool grid-targeting demo: orient to a labeled grid, zoom into a cell, click the crosshair, verify" width="440" />
+
+<sub>Real `gui-tool` output — orient to a labeled grid → zoom into a cell → click the crosshair → verify.</sub>
+
+</div>
+
+---
+
+Built for AI desktop agents (Claude Code, Codex, Gemini CLI, and friends), but it works fine as a general-purpose GUI automation tool.
+
+**Why it's different:** agents are bad at guessing pixel coordinates from a screenshot, and every other automation tool makes them try. `gui-tool` removes pixels entirely — it overlays a **labeled grid** with a crosshair at each cell's center, the agent names a cell, and the click lands exactly on that crosshair. Need more precision? Zoom into the cell for a sub-grid and name a sub-cell (`C7.F3`). It's the whole workflow in one line: **orient → zoom → click → verify.**
+
+**It sees pixels, not an accessibility tree.** Most desktop-automation tools for agents find elements by reading the OS accessibility tree — which only helps when that tree *exists*, is *complete*, and is *correct*. `gui-tool` never touches it. It works from the actual rendered screen, so it drives what tree-based tools can't see: games, `<canvas>` / WebGL apps, Flutter and other custom-drawn UIs, remote desktops and VNC, video, and any app with missing, mislabeled, or wrong accessibility data. **If a human can see it, `gui-tool` can click it.**
+
+Everything is hand-rolled against raw OS APIs — its own PNG encoder, D-Bus client, JSON output, and DEFLATE — so there are no crates to audit, no build surprises, and it runs natively on **GNOME/Wayland** where `xdotool` and `pyautogui` give up.
+
+<div align="center">
+
+<img src="assets/demo_browser.gif" alt="gui-tool driving a Firefox private window: navigate to a site, click a search field, type a query, and submit — entirely by grid cell" width="720" />
+
+<sub>End-to-end in a real browser — navigate, click a field by cell, type, and submit, no pixel coordinates anywhere.</sub>
+
+</div>
 
 ## Features
 
 - **Grid targeting:** Overlay a labeled grid on screenshots with red crosshairs at each cell center. Click by cell label — no pixel coordinates. Supports recursive zoom (`B2.C1`) and between-cell targeting (`D3+E3`).
+- **No accessibility tree required:** Targets purely from what's on screen — never AT-SPI, UI Automation, or the AX APIs. Works where the accessibility tree is missing, incomplete, or wrong: games, `<canvas>`/WebGL, custom-drawn UIs (Flutter, etc.), and remote desktops.
 - **Contextual zoom:** Zoomed views show the target cell with a coarser sub-grid, surrounded by dimmed context from adjacent cells with parent-level labels for spatial orientation.
 - **No dependencies:** Pure std Rust, direct FFI to OS APIs (CoreGraphics, user32.dll, D-Bus). Compiles to a single small binary.
 - **Wayland support:** Works natively on GNOME/Wayland via XDG Desktop Portals and the `window-calls` extension, where tools like `xdotool` and `pyautogui` break.
@@ -16,7 +47,7 @@ Built for AI desktop agents (Claude Code, Codex, Gemini CLI, etc.) but works fin
 
 ## Grid Targeting
 
-The main idea: agents are bad at guessing pixel coordinates from screenshots. Instead, `gui-tool` overlays a labeled grid, and the agent references cells by label. The workflow is **orient → zoom → zoom → ... → click → verify**.
+The full workflow — **orient → zoom → zoom → ... → click → verify** — in commands:
 
 ```bash
 # Screenshot with labeled grid overlay (auto-scales: 16x9 for full screen)
@@ -138,6 +169,8 @@ The setup script detects your OS, handles platform-specific setup, and builds th
 |**Linux**  |GNOME/Wayland|`input` group + udev rule + [window-calls](https://github.com/ickyicky/window-calls) extension (handled by `setup.sh`)|
 |**macOS**  |10.15+       |Grant **Accessibility** + **Screen Recording** permissions in System Settings                                         |
 |**Windows**|8+           |None (`cargo build --release` in MSYS2, Git Bash, or PowerShell)                                                      |
+
+> The macOS **Accessibility** permission grants the right to *synthesize* mouse/keyboard input (post `CGEvent`s) — it is **not** used to read the accessibility tree. `gui-tool` never inspects the tree on any platform.
 
 ## Architecture
 
