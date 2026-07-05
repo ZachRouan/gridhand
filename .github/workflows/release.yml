@@ -33,10 +33,12 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-          - os: macos-13
-            target: x86_64-apple-darwin
+          # Both macOS targets build on the Apple Silicon runner: aarch64 natively
+          # and x86_64 by cross-compile. Avoids the scarce macos-13 Intel runners.
           - os: macos-14
             target: aarch64-apple-darwin
+          - os: macos-14
+            target: x86_64-apple-darwin
           - os: windows-latest
             target: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.os }}
