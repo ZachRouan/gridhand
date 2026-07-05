@@ -12,7 +12,7 @@ A cross-platform Rust CLI for GUI automation: screenshots, window management, mo
 ![Rust](https://img.shields.io/badge/Rust-std--only-orange?style=flat-square)
 [![GitHub stars](https://img.shields.io/github/stars/ZachRouan/agent-desktop-interface?style=flat-square)](https://github.com/ZachRouan/agent-desktop-interface/stargazers)
 
-<img src="assets/demo.gif" alt="gui-tool grid-targeting demo: orient to a labeled grid, zoom into a cell, click the crosshair, verify" width="440" />
+<img src="https://raw.githubusercontent.com/ZachRouan/agent-desktop-interface/main/assets/demo.gif" alt="gui-tool grid-targeting demo: orient to a labeled grid, zoom into a cell, click the crosshair, verify" width="440" />
 
 <sub>Real `gui-tool` output — orient to a labeled grid → zoom into a cell → click the crosshair → verify.</sub>
 
@@ -30,7 +30,7 @@ Everything is hand-rolled against raw OS APIs — its own PNG encoder, D-Bus cli
 
 <div align="center">
 
-<img src="assets/demo_browser.gif" alt="gui-tool driving a Firefox private window: navigate to a site, click a search field, type a query, and submit — entirely by grid cell" width="720" />
+<img src="https://raw.githubusercontent.com/ZachRouan/agent-desktop-interface/main/assets/demo_browser.gif" alt="gui-tool driving a Firefox private window: navigate to a site, click a search field, type a query, and submit — entirely by grid cell" width="720" />
 
 <sub>End-to-end in a real browser — navigate, click a field by cell, type, and submit, no pixel coordinates anywhere.</sub>
 
@@ -150,17 +150,36 @@ mkdir -p ~/.codex/skills/gui-tool
 cp skills/gui-tool/SKILL.md ~/.codex/skills/gui-tool/SKILL.md
 ```
 
-## Installation
+## Install
 
-Requires the [Rust toolchain](https://rustup.rs/).
+Pick the easiest that fits. On **Linux and macOS** there's a one-time platform-setup step after you get the binary (input permissions and the GNOME `window-calls` extension on Linux; Accessibility + Screen Recording permissions on macOS) — see [Platform Requirements](#platform-requirements). Windows needs nothing.
+
+**Prebuilt binary** (no Rust toolchain) — grab your platform's archive from the [latest release](https://github.com/ZachRouan/agent-desktop-interface/releases/latest), then:
+
+```bash
+tar xzf gui-tool-*.tar.gz                      # or unzip on Windows
+sudo install gui-tool-*/gui-tool /usr/local/bin/   # or: mv … ~/.local/bin/
+```
+
+**From crates.io** (needs the [Rust toolchain](https://rustup.rs/)):
+
+```bash
+cargo install gui-tool
+```
+
+**From source:**
 
 ```bash
 git clone https://github.com/ZachRouan/agent-desktop-interface
 cd agent-desktop-interface
-./setup.sh
+./setup.sh          # detects your OS, does platform setup, and builds
 ```
 
-The setup script detects your OS, handles platform-specific setup, and builds the release binary.
+After a **prebuilt or `cargo install`** on Linux/macOS, run the platform setup without rebuilding — either follow the manual steps in [Platform Requirements](#platform-requirements), or from a clone:
+
+```bash
+./setup.sh --skip-build
+```
 
 ### Platform Requirements
 

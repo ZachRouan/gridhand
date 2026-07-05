@@ -1,6 +1,15 @@
 #!/bin/bash
 set -e
 
+# --skip-build: do the platform setup only (for users who installed the binary
+# via `cargo install gui-tool` or a prebuilt release and don't need to compile).
+SKIP_BUILD=0
+for arg in "$@"; do
+    case "$arg" in
+        --skip-build|--setup-only) SKIP_BUILD=1 ;;
+    esac
+done
+
 OS="$(uname -s)"
 echo "=== gui-tool setup ($OS) ==="
 
@@ -84,10 +93,15 @@ if echo "$OS" | grep -qi "MINGW\|MSYS\|CYGWIN"; then
 fi
 
 # --- Build (all platforms) ---
-echo ""
-echo "Building gui-tool..."
-cargo build --release
-echo "Binary at: $(pwd)/target/release/gui-tool"
+if [ "$SKIP_BUILD" -eq 1 ]; then
+    echo ""
+    echo "Skipping build (--skip-build): using an already-installed gui-tool binary."
+else
+    echo ""
+    echo "Building gui-tool..."
+    cargo build --release
+    echo "Binary at: $(pwd)/target/release/gui-tool"
+fi
 
 echo ""
 echo "=== Setup complete ==="

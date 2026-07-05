@@ -2,5 +2,19 @@
 name = "gui-tool"
 version = "0.3.0"
 edition = "2024"
+rust-version = "1.85"
+description = "Zero-dependency cross-platform CLI for GUI automation — screenshots, window management, mouse/keyboard, JSON in/out. Clicks by labeled grid cell: no pixel coordinates, no accessibility tree. Built for AI agents."
+authors = ["Zach Rouan <ZachRouan@gmail.com>"]
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/ZachRouan/agent-desktop-interface"
+homepage = "https://github.com/ZachRouan/agent-desktop-interface"
+keywords = ["gui", "automation", "screenshot", "agent", "cli"]
+categories = ["command-line-utilities", "os"]
+include = ["src/**", "LICENSE", "README.md", "Cargo.lock"]
+
+[[bin]]
+name = "gui-tool"
+path = "src/main.rs"
 
 [dependencies]
