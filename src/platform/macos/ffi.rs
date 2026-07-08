@@ -197,6 +197,14 @@ unsafe extern "C" {
     pub fn objc_msgSend(receiver: *mut c_void, selector: *mut c_void, ...) -> *mut c_void;
 }
 
+// AppKit must be linked so dyld loads it into the process: NSRunningApplication
+// is an AppKit class, and objc_getClass can only find classes from loaded
+// images. CoreGraphics/CoreFoundation do not pull AppKit in. Without this,
+// raise_window fails on every macOS machine ("Failed to get NSRunningApplication
+// class") and takes all --window/--window-id flows down with it.
+#[link(name = "AppKit", kind = "framework")]
+unsafe extern "C" {}
+
 // --- Helpers ---
 
 /// Read a CFString into a Rust String. Returns None if the pointer is null or conversion fails.
