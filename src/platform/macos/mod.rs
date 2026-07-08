@@ -21,7 +21,8 @@ pub fn find_window_by_title(title: &str) -> Result<Option<(u64, String)>, String
 }
 
 pub fn get_window_bounds(id: u64) -> Result<(i32, i32, u32, u32), String> {
-    windows::get_window_bounds(id as u32)
+    let id32 = u32::try_from(id).map_err(|_| format!("Window ID {} out of range", id))?;
+    windows::get_window_bounds(id32)
 }
 
 pub fn list_windows() -> Result<String, String> {

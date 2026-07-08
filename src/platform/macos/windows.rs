@@ -15,17 +15,22 @@ pub fn list_windows() -> Result<String, String> {
 }
 
 pub fn raise_window(id: u64) -> Result<String, String> {
+    // window-calls / CGWindowID is a u32 on the wire; a larger value would
+    // silently wrap and act on a different window (mirrors linux/mod.rs's
+    // check_window_id).
+    let id32 = u32::try_from(id).map_err(|_| format!("Window ID {} out of range", id))?;
+
     // Find the PID for this window
-    let pid = get_window_pid(id as u32)?;
+    let pid = get_window_pid(id32)?;
 
     // Use NSRunningApplication to activate the app
     unsafe {
-        let cls = objc_getClass(b"NSRunningApplication\0".as_ptr());
+        let cls = objc_getClass(c"NSRunningApplication".as_ptr().cast());
         if cls.is_null() {
             return Err("Failed to get NSRunningApplication class".to_string());
         }
 
-        let sel = sel_registerName(b"runningApplicationWithProcessIdentifier:\0".as_ptr());
+        let sel = sel_registerName(c"runningApplicationWithProcessIdentifier:".as_ptr().cast());
         // Cast objc_msgSend for this specific signature: (Class, SEL, pid_t) -> id
         let msg_send: extern "C" fn(*mut c_void, *mut c_void, i32) -> *mut c_void =
             std::mem::transmute(objc_msgSend as *const c_void);
@@ -36,7 +41,7 @@ pub fn raise_window(id: u64) -> Result<String, String> {
         }
 
         // [app activateWithOptions:NSApplicationActivateIgnoringOtherApps]
-        let sel = sel_registerName(b"activateWithOptions:\0".as_ptr());
+        let sel = sel_registerName(c"activateWithOptions:".as_ptr().cast());
         let msg_send: extern "C" fn(*mut c_void, *mut c_void, u64) -> bool =
             std::mem::transmute(objc_msgSend as *const c_void);
         let activated = msg_send(app, sel, NSApplicationActivateIgnoringOtherApps);

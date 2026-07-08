@@ -71,6 +71,8 @@ pub const kCFStringEncodingUTF8: u32 = 0x08000100;
 
 // --- CGImage bitmap info ---
 
+pub const kCGBitmapAlphaInfoMask: u32 = 0x1F;
+pub const kCGBitmapByteOrderMask: u32 = 0x7000;
 pub const kCGBitmapByteOrderDefault: u32 = 0;
 pub const kCGBitmapByteOrder32Little: u32 = 2 << 12;
 pub const kCGImageAlphaPremultipliedFirst: u32 = 2;
@@ -175,6 +177,8 @@ unsafe extern "C" {
         bufferSize: i64,
         encoding: u32,
     ) -> bool;
+    pub fn CFStringGetLength(theString: *const c_void) -> isize;
+    pub fn CFStringGetMaximumSizeForEncoding(length: isize, encoding: u32) -> isize;
 
     // CFData
     pub fn CFDataGetBytePtr(data: *const c_void) -> *const u8;
@@ -217,19 +221,33 @@ unsafe extern "C" {}
 // --- Helpers ---
 
 /// Read a CFString into a Rust String. Returns None if the pointer is null or conversion fails.
+///
+/// The buffer is sized from the string's own length rather than a fixed
+/// guess: a fixed 512-byte buffer silently truncates (or fails outright on)
+/// long window titles, which are common (browser tabs, document paths).
 pub fn cfstring_to_string(cfstr: *const c_void) -> Option<String> {
     if cfstr.is_null() {
         return None;
     }
-    let mut buf = [0u8; 512];
-    let ok = unsafe {
-        CFStringGetCString(cfstr, buf.as_mut_ptr(), buf.len() as i64, kCFStringEncodingUTF8)
-    };
-    if !ok {
-        return None;
+    unsafe {
+        let len = CFStringGetLength(cfstr);
+        if len < 0 {
+            return None;
+        }
+        let max_size = CFStringGetMaximumSizeForEncoding(len, kCFStringEncodingUTF8);
+        if max_size < 0 {
+            return None;
+        }
+        // +1 for the trailing NUL that CFStringGetCString always writes.
+        let buf_size = (max_size as usize).saturating_add(1);
+        let mut buf = vec![0u8; buf_size];
+        let ok = CFStringGetCString(cfstr, buf.as_mut_ptr(), buf_size as i64, kCFStringEncodingUTF8);
+        if !ok {
+            return None;
+        }
+        let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+        Some(String::from_utf8_lossy(&buf[..end]).to_string())
     }
-    let len = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
-    Some(String::from_utf8_lossy(&buf[..len]).to_string())
 }
 
 /// Read a CFNumber (i32) from a pointer. Returns None if null.
