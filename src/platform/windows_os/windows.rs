@@ -167,9 +167,12 @@ fn enum_visible_windows() -> Vec<WindowInfo> {
             let mut pid: u32 = 0;
             GetWindowThreadProcessId(hwnd, &mut pid);
 
-            // Get bounds
-            let mut rect = RECT::default();
-            GetWindowRect(hwnd, &mut rect);
+            // Get bounds via the same DWM-extended-frame-bounds-first helper
+            // used by the click/screenshot pipeline (window_rect), so listed
+            // bounds agree with the region a screenshot/click actually uses;
+            // fall back to a default rect (but keep listing the window) if
+            // it can't be resolved.
+            let rect = window_rect(hwnd).unwrap_or_default();
 
             windows.push(WindowInfo {
                 hwnd: hwnd as u64,

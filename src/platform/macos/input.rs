@@ -358,7 +358,7 @@ fn modifier_to_keycode(name: &str) -> Option<(u16, bool)> {
         "f10" => Some((kVK_F10, false)),
         "f11" => Some((kVK_F11, false)),
         "f12" => Some((kVK_F12, false)),
-        s if s.len() == 1 => char_to_keycode(s.chars().next().unwrap()),
+        s if s.chars().count() == 1 => char_to_keycode(s.chars().next().unwrap()),
         _ => None,
     }
 }
