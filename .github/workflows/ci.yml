@@ -6,30 +6,33 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
+env:
+  RUSTFLAGS: -D warnings
+
 jobs:
-  test-linux:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build
+      - run: cargo test
+
+  msrv:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - run: cargo build
-      - run: cargo test
-
-  test-macos:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - run: cargo build
-      - run: cargo test
-
-  test-windows:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - run: cargo build
-      - run: cargo test
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.88"
+      - run: cargo check
 
   clippy:
     runs-on: ubuntu-latest
@@ -38,4 +41,19 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+          targets: x86_64-apple-darwin, x86_64-pc-windows-msvc
       - run: cargo clippy -- -D warnings
+      - run: cargo clippy --target x86_64-apple-darwin -- -D warnings
+      - run: cargo clippy --target x86_64-pc-windows-msvc -- -D warnings
+
+  zero-deps:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assert the dependency tree is exactly one crate
+        run: |
+          count="$(grep -c '^name = ' Cargo.lock)"
+          if [ "$count" != "1" ]; then
+            echo "Cargo.lock lists $count packages; the zero-dependency constraint requires exactly 1 (gui-tool itself)."
+            exit 1
+          fi
