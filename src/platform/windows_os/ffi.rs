@@ -229,6 +229,7 @@ unsafe extern "system" {
     pub fn DwmGetWindowAttribute(hwnd: HWND, dwAttribute: u32, pvAttribute: *mut c_void, cbAttribute: u32) -> i32;
 }
 
+pub const DWMWA_EXTENDED_FRAME_BOUNDS: u32 = 9;
 pub const DWMWA_CLOAKED: u32 = 14;
 
 // --- Helpers ---

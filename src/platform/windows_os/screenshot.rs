@@ -141,6 +141,12 @@ fn capture_region(x: i32, y: i32, width: i32, height: i32) -> Result<crate::plat
             bmiColors: [RGBQUAD { rgbBlue: 0, rgbGreen: 0, rgbRed: 0, rgbReserved: 0 }],
         };
 
+        // GetDIBits requires the source bitmap not be currently selected
+        // into a DC; deselect it (restoring mem_dc's original bitmap)
+        // before reading, or the call can silently return garbage/zeroed
+        // pixel data on some drivers.
+        SelectObject(mem_dc, old_bitmap);
+
         let lines = GetDIBits(
             mem_dc,
             bitmap,
@@ -152,7 +158,6 @@ fn capture_region(x: i32, y: i32, width: i32, height: i32) -> Result<crate::plat
         );
 
         // Cleanup GDI resources
-        SelectObject(mem_dc, old_bitmap);
         DeleteObject(bitmap);
         DeleteDC(mem_dc);
         ReleaseDC(std::ptr::null_mut(), screen_dc);

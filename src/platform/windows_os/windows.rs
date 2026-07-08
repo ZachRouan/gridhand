@@ -81,15 +81,10 @@ pub fn find_window_by_title(title: &str) -> Result<Option<(u64, String)>, String
     Ok(None)
 }
 
-/// Get window bounds by id.
+/// Get a window's captureable rect by id.
 pub fn get_window_rect(id: u64) -> Result<RECT, String> {
     let hwnd = id_to_hwnd(id);
-    let mut rect = RECT::default();
-    let ok = unsafe { GetWindowRect(hwnd, &mut rect) };
-    if ok == 0 {
-        return Err(format!("Failed to get window rect (id={})", id));
-    }
-    Ok(rect)
+    window_rect(hwnd).ok_or_else(|| format!("Failed to get window rect (id={})", id))
 }
 
 /// Reconstruct an HWND from a CLI/JSON-round-tripped u64 id. HWNDs are
@@ -101,6 +96,31 @@ pub fn get_window_rect(id: u64) -> Result<RECT, String> {
 /// plain cast.
 fn id_to_hwnd(id: u64) -> HWND {
     id as u32 as i32 as isize as HWND
+}
+
+/// Resolve a window's captureable rect: DWM's extended-frame-bounds
+/// (excludes the invisible resize-border/shadow strips most windows carry)
+/// when available, falling back to GetWindowRect. Used for both the
+/// screenshot capture region (via `get_window_rect`, which every screenshot
+/// path calls) and `get_window_bounds` — they must stay consistent or grid
+/// clicks computed against one land off the image captured via the other.
+fn window_rect(hwnd: HWND) -> Option<RECT> {
+    let mut rect = RECT::default();
+    let hr = unsafe {
+        DwmGetWindowAttribute(
+            hwnd,
+            DWMWA_EXTENDED_FRAME_BOUNDS,
+            &mut rect as *mut RECT as *mut c_void,
+            std::mem::size_of::<RECT>() as u32,
+        )
+    };
+    if hr == 0 {
+        return Some(rect);
+    }
+
+    let mut rect = RECT::default();
+    let ok = unsafe { GetWindowRect(hwnd, &mut rect) };
+    if ok == 0 { None } else { Some(rect) }
 }
 
 // --- Internal ---
