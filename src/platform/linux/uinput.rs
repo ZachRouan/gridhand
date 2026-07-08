@@ -518,33 +518,12 @@ pub fn key_type(text: &str) -> Result<String, String> {
     Ok(crate::json::success())
 }
 
-/// Split a combo on '+', treating a doubled '+' as the literal plus key
-/// ("ctrl++" is ctrl and '+').
-fn split_combo(combo: &str) -> Vec<String> {
-    let mut parts = Vec::new();
-    let mut cur = String::new();
-    for c in combo.chars() {
-        if c == '+' {
-            if cur.is_empty() {
-                cur.push('+');
-            }
-            parts.push(std::mem::take(&mut cur));
-        } else {
-            cur.push(c);
-        }
-    }
-    if !cur.is_empty() {
-        parts.push(cur);
-    }
-    parts
-}
-
 /// Resolve a combo into the ordered key sequence to press. Characters that
 /// need shift on the US layout get KEY_LEFTSHIFT inserted before them —
 /// "ctrl+%" must press ctrl+shift+5, not ctrl+5.
 fn combo_to_keys(combo: &str) -> Result<Vec<u16>, String> {
     let mut keys: Vec<u16> = Vec::new();
-    for part in split_combo(combo) {
+    for part in crate::keycombo::split_combo(combo)? {
         let lower = part.to_lowercase();
         let mut chars = lower.chars();
         if let (Some(c), None) = (chars.next(), chars.next())
@@ -588,12 +567,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_split_combo() {
-        assert_eq!(split_combo("ctrl+a"), vec!["ctrl", "a"]);
-        assert_eq!(split_combo("ctrl+shift+t"), vec!["ctrl", "shift", "t"]);
-        // A doubled '+' is the literal plus key
-        assert_eq!(split_combo("ctrl++"), vec!["ctrl", "+"]);
-        assert_eq!(split_combo("+"), vec!["+"]);
+    fn test_combo_to_keys_rejects_trailing_plus() {
+        // combo_to_keys propagates the shared split_combo error: a dangling
+        // separator must not silently press bare ctrl for a typo'd combo.
+        let err = combo_to_keys("ctrl+").unwrap_err();
+        assert!(err.contains("trailing"), "error should name the problem, got: {}", err);
     }
 
     #[test]

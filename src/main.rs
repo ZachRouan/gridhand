@@ -1,5 +1,6 @@
 mod grid;
 mod json;
+mod keycombo;
 mod platform;
 mod validate;
 
