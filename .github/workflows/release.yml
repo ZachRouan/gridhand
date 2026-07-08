@@ -1,7 +1,7 @@
 name: Release
 
 # Push a version tag to cut a release with prebuilt binaries:
-#   git tag v0.3.1 && git push origin v0.3.1
+#   git tag vX.Y.Z && git push origin vX.Y.Z   (must match Cargo.toml and plugin.json versions)
 
 on:
   push:
