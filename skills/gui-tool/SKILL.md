@@ -70,3 +70,8 @@ Tiny targets (like/dislike buttons, close icons, checkboxes) need 3+ zoom levels
 ### Dot Notation
 
 `B2.C1` = sub-cell C1 within parent B2. Change the last segment to try a neighbor at the same depth (`B2.D2`). Append to go deeper (`B2.C1.F3`).
+
+## Known Failure Modes
+
+- **Non-ASCII text on Linux:** `gui-tool key type` errors on non-ASCII characters on Linux (the uinput backend only synthesizes ASCII keycodes). Stick to ASCII text, or split out non-ASCII characters and handle them another way (e.g. clipboard paste via a key combo, if the target app supports it).
+- **Zoom chains bottoming out:** Recursive zoom (`B2.C1.F3...`) fails with a "cell size reaches zero" error around 3 levels deep, once the cropped region gets too small to subdivide further. If you hit this, back off one level and either retry with fewer zoom levels, or take a fresh screenshot with an explicit coarser `--grid` (e.g. `--grid 4x4`) so each cell covers more pixels.

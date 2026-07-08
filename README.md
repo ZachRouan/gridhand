@@ -201,11 +201,17 @@ After a **prebuilt or `cargo install`** on Linux/macOS, run the platform setup w
 
 ## Architecture
 
-~3,500 lines of Rust, no external crates. Each platform uses direct OS APIs:
+~9,100 lines of Rust, no external crates. Each platform uses direct OS APIs:
 
 - **Linux:** `/dev/uinput` for input via ioctl syscalls. Full D-Bus wire protocol implementation (SASL auth, message framing, type marshalling) for XDG Desktop Portal screenshots and GNOME `window-calls` window management.
 - **macOS:** CoreGraphics FFI (`CGEventCreateMouseEvent`, `CGEventCreateKeyboardEvent`) for input. `CGWindowListCreateImage` for screenshots. Objective-C runtime bindings for window activation.
 - **Windows:** `user32.dll` (`SendInput`, `EnumWindows`, `SetForegroundWindow`, `VkKeyScanW`) and `gdi32.dll` (`BitBlt`, `GetDIBits`) for input, window management, and screenshots.
+
+## Known limitations
+
+- **macOS window raise** activates the owning application, not necessarily the specific window — if an app has multiple windows, the one that ends up frontmost may not be the one you targeted.
+- **macOS screenshots** use `CGWindowListCreateImage`, a CoreGraphics API deprecated in macOS 14. It still works today; a ScreenCaptureKit-based backend is future work.
+- **Linux desktop-size detection** prefers GNOME Mutter's `DisplayConfig` D-Bus interface and falls back to a DRM-sysfs heuristic on non-GNOME/non-Mutter sessions.
 
 ## License
 
