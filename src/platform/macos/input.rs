@@ -89,23 +89,36 @@ pub fn key_type(text: &str) -> Result<String, String> {
 }
 
 pub fn key_press(combo: &str) -> Result<String, String> {
-    let parts: Vec<&str> = combo.split('+').collect();
+    let parts = crate::keycombo::split_combo(combo)?;
     let mut keycodes: Vec<u16> = Vec::new();
+    let mut flags: u64 = 0;
+
     for part in &parts {
-        let key = modifier_to_keycode(&part.to_lowercase())
+        let (key, needs_shift) = modifier_to_keycode(&part.to_lowercase())
             .ok_or_else(|| format!("Unknown key: {}", part))?;
+
+        if let Some(mask) = modifier_flag_for_keycode(key) {
+            flags |= mask;
+        }
+
+        if needs_shift {
+            flags |= kCGEventFlagMaskShift;
+            if !keycodes.contains(&kVK_Shift) {
+                keycodes.push(kVK_Shift);
+            }
+        }
         keycodes.push(key);
     }
 
     unsafe {
         // Press all keys down in order
         for (idx, &kc) in keycodes.iter().enumerate() {
-            let event = CGEventCreateKeyboardEvent(std::ptr::null(), kc, true);
+            let event = make_key_event(kc, true, flags);
             if event.is_null() {
                 // Release anything already pressed so modifiers don't stay
                 // stuck down machine-wide, then report the failure.
                 for &pressed in keycodes[..idx].iter().rev() {
-                    let up = CGEventCreateKeyboardEvent(std::ptr::null(), pressed, false);
+                    let up = make_key_event(pressed, false, flags);
                     if !up.is_null() {
                         CGEventPost(kCGHIDEventTap, up);
                         CFRelease(up);
@@ -119,9 +132,21 @@ pub fn key_press(combo: &str) -> Result<String, String> {
         }
 
         // Release in reverse order
-        for &kc in keycodes.iter().rev() {
-            let event = CGEventCreateKeyboardEvent(std::ptr::null(), kc, false);
+        let release_order: Vec<u16> = keycodes.iter().rev().copied().collect();
+        for (idx, &kc) in release_order.iter().enumerate() {
+            let event = make_key_event(kc, false, flags);
             if event.is_null() {
+                // A mid-release allocation failure must not leave a modifier
+                // (e.g. cmd) held down machine-wide: best-effort release
+                // everything still down — this key plus everything after it
+                // in release order — before reporting the error.
+                for &remaining in &release_order[idx..] {
+                    let up = make_key_event(remaining, false, flags);
+                    if !up.is_null() {
+                        CGEventPost(kCGHIDEventTap, up);
+                        CFRelease(up);
+                    }
+                }
                 return Err(format!("Failed to create key-up event for '{}'", combo));
             }
             CGEventPost(kCGHIDEventTap, event);
@@ -298,40 +323,140 @@ fn char_to_keycode(c: char) -> Option<(u16, bool)> {
     }
 }
 
-/// Map a modifier/key name to macOS virtual keycode
-fn modifier_to_keycode(name: &str) -> Option<u16> {
+/// Map a modifier/key name to (macOS virtual keycode, needs_shift). Every
+/// named key returns `needs_shift: false` — only the single-char arm (which
+/// delegates to `char_to_keycode`) can require shift, e.g. "%" is shift+5.
+fn modifier_to_keycode(name: &str) -> Option<(u16, bool)> {
     match name {
-        "ctrl" | "control" => Some(kVK_Control),
-        "shift" => Some(kVK_Shift),
-        "alt" | "option" => Some(kVK_Option),
-        "super" | "meta" | "cmd" | "command" => Some(kVK_Command),
-        "tab" => Some(kVK_Tab),
-        "enter" | "return" => Some(kVK_Return),
-        "space" => Some(kVK_Space),
-        "backspace" | "delete" => Some(kVK_Delete),
-        "forwarddelete" | "del" => Some(kVK_ForwardDelete),
-        "escape" | "esc" => Some(kVK_Escape),
-        "up" => Some(kVK_UpArrow),
-        "down" => Some(kVK_DownArrow),
-        "left" => Some(kVK_LeftArrow),
-        "right" => Some(kVK_RightArrow),
-        "home" => Some(kVK_Home),
-        "end" => Some(kVK_End),
-        "pageup" => Some(kVK_PageUp),
-        "pagedown" => Some(kVK_PageDown),
-        "f1" => Some(kVK_F1),
-        "f2" => Some(kVK_F2),
-        "f3" => Some(kVK_F3),
-        "f4" => Some(kVK_F4),
-        "f5" => Some(kVK_F5),
-        "f6" => Some(kVK_F6),
-        "f7" => Some(kVK_F7),
-        "f8" => Some(kVK_F8),
-        "f9" => Some(kVK_F9),
-        "f10" => Some(kVK_F10),
-        "f11" => Some(kVK_F11),
-        "f12" => Some(kVK_F12),
-        s if s.len() == 1 => char_to_keycode(s.chars().next().unwrap()).map(|(k, _)| k),
+        "ctrl" | "control" => Some((kVK_Control, false)),
+        "shift" => Some((kVK_Shift, false)),
+        "alt" | "option" => Some((kVK_Option, false)),
+        "super" | "meta" | "cmd" | "command" | "win" => Some((kVK_Command, false)),
+        "tab" => Some((kVK_Tab, false)),
+        "enter" | "return" => Some((kVK_Return, false)),
+        "space" => Some((kVK_Space, false)),
+        "backspace" | "delete" => Some((kVK_Delete, false)),
+        "forwarddelete" | "del" => Some((kVK_ForwardDelete, false)),
+        "escape" | "esc" => Some((kVK_Escape, false)),
+        "up" => Some((kVK_UpArrow, false)),
+        "down" => Some((kVK_DownArrow, false)),
+        "left" => Some((kVK_LeftArrow, false)),
+        "right" => Some((kVK_RightArrow, false)),
+        "home" => Some((kVK_Home, false)),
+        "end" => Some((kVK_End, false)),
+        "pageup" => Some((kVK_PageUp, false)),
+        "pagedown" => Some((kVK_PageDown, false)),
+        "f1" => Some((kVK_F1, false)),
+        "f2" => Some((kVK_F2, false)),
+        "f3" => Some((kVK_F3, false)),
+        "f4" => Some((kVK_F4, false)),
+        "f5" => Some((kVK_F5, false)),
+        "f6" => Some((kVK_F6, false)),
+        "f7" => Some((kVK_F7, false)),
+        "f8" => Some((kVK_F8, false)),
+        "f9" => Some((kVK_F9, false)),
+        "f10" => Some((kVK_F10, false)),
+        "f11" => Some((kVK_F11, false)),
+        "f12" => Some((kVK_F12, false)),
+        s if s.len() == 1 => char_to_keycode(s.chars().next().unwrap()),
         _ => None,
+    }
+}
+
+/// The CGEventFlags mask contributed by a modifier keycode, or None if `kc`
+/// is not one of the four base modifiers. Deriving the mask from the
+/// resolved keycode (rather than re-matching the source name) keeps the
+/// name→flag mapping in one place: `modifier_to_keycode` above.
+fn modifier_flag_for_keycode(kc: u16) -> Option<u64> {
+    match kc {
+        kVK_Command => Some(kCGEventFlagMaskCommand),
+        kVK_Shift => Some(kCGEventFlagMaskShift),
+        kVK_Control => Some(kCGEventFlagMaskControl),
+        kVK_Option => Some(kCGEventFlagMaskAlternate),
+        _ => None,
+    }
+}
+
+/// Create a keyboard event and, for a non-modifier ("action") key, stamp it
+/// with the combo's flags mask before returning. This is Apple's documented
+/// pattern for synthetic hotkeys: session-state propagation between
+/// separately posted modifier down/up events is timing-dependent, and
+/// without it `cmd+a` occasionally typed a bare "a". Modifier key events
+/// (cmd/shift/ctrl/option themselves) keep default flags. Returns a null
+/// pointer on allocation failure, same as `CGEventCreateKeyboardEvent`.
+unsafe fn make_key_event(kc: u16, key_down: bool, flags: u64) -> *mut c_void {
+    unsafe {
+        let event = CGEventCreateKeyboardEvent(std::ptr::null(), kc, key_down);
+        if !event.is_null() && modifier_flag_for_keycode(kc).is_none() {
+            CGEventSetFlags(event, flags);
+        }
+        event
+    }
+}
+
+// This whole module is `#[cfg(target_os = "macos")]`-gated at
+// `platform/mod.rs`, so these tests only compile and run in CI's macos job
+// (or on macOS hardware) — never under a Linux-host `cargo test`. They cover
+// pure keycode/flag mapping only; nothing here touches the CoreGraphics FFI.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn named_modifiers_never_need_shift() {
+        for name in ["ctrl", "control", "shift", "alt", "option", "cmd", "command", "super", "meta", "win"] {
+            let (_, needs_shift) = modifier_to_keycode(name).unwrap_or_else(|| panic!("{} should resolve", name));
+            assert!(!needs_shift, "{} should not need shift", name);
+        }
+    }
+
+    #[test]
+    fn win_and_cmd_resolve_to_the_same_keycode() {
+        // "win" is accepted as a Command alias so combos behave the same as
+        // the Linux and Windows backends, which both treat win/super/meta
+        // as the platform "super" key.
+        assert_eq!(modifier_to_keycode("win"), modifier_to_keycode("cmd"));
+        assert_eq!(modifier_to_keycode("win").unwrap().0, kVK_Command);
+    }
+
+    #[test]
+    fn uppercase_letter_needs_shift() {
+        let (key, needs_shift) = modifier_to_keycode("A").unwrap();
+        assert_eq!(key, kVK_ANSI_A);
+        assert!(needs_shift);
+    }
+
+    #[test]
+    fn lowercase_letter_does_not_need_shift() {
+        let (key, needs_shift) = modifier_to_keycode("a").unwrap();
+        assert_eq!(key, kVK_ANSI_A);
+        assert!(!needs_shift);
+    }
+
+    #[test]
+    fn shifted_symbol_needs_shift() {
+        // "+" is shift+= on a US layout.
+        let (key, needs_shift) = modifier_to_keycode("+").unwrap();
+        assert_eq!(key, kVK_ANSI_Equal);
+        assert!(needs_shift);
+    }
+
+    #[test]
+    fn unknown_key_name_is_none() {
+        assert!(modifier_to_keycode("nonexistent_key").is_none());
+    }
+
+    #[test]
+    fn modifier_flag_for_keycode_covers_all_four_modifiers() {
+        assert_eq!(modifier_flag_for_keycode(kVK_Command), Some(kCGEventFlagMaskCommand));
+        assert_eq!(modifier_flag_for_keycode(kVK_Shift), Some(kCGEventFlagMaskShift));
+        assert_eq!(modifier_flag_for_keycode(kVK_Control), Some(kCGEventFlagMaskControl));
+        assert_eq!(modifier_flag_for_keycode(kVK_Option), Some(kCGEventFlagMaskAlternate));
+    }
+
+    #[test]
+    fn modifier_flag_for_keycode_is_none_for_action_keys() {
+        assert_eq!(modifier_flag_for_keycode(kVK_ANSI_A), None);
+        assert_eq!(modifier_flag_for_keycode(kVK_Return), None);
     }
 }

@@ -82,6 +82,13 @@ pub const kCGImageAlphaNoneSkipLast: u32 = 5;
 
 pub const NSApplicationActivateIgnoringOtherApps: u64 = 1 << 1;
 
+// --- CGEvent flag masks (for synthetic hotkeys) ---
+
+pub const kCGEventFlagMaskShift: u64 = 0x00020000;
+pub const kCGEventFlagMaskControl: u64 = 0x00040000;
+pub const kCGEventFlagMaskAlternate: u64 = 0x00080000;
+pub const kCGEventFlagMaskCommand: u64 = 0x00100000;
+
 // --- CoreGraphics FFI ---
 
 #[link(name = "CoreGraphics", kind = "framework")]
@@ -108,6 +115,8 @@ unsafe extern "C" {
     );
 
     pub fn CGEventPost(tap: u32, event: *mut c_void);
+
+    pub fn CGEventSetFlags(event: *mut c_void, flags: u64);
 
     // Screenshots
     pub fn CGWindowListCreateImage(
