@@ -80,16 +80,17 @@ impl MarshalBuffer {
         len_pos
     }
 
-    pub fn finish_array(&mut self, len_pos: usize) {
-        let len_field_end = len_pos + 4;
-        let mut data_start = len_field_end;
-        while data_start < self.data.len() && !data_start.is_multiple_of(8) && data_start < len_field_end + 8 {
+    /// `element_alignment` must match the value passed to the `start_array`
+    /// call that produced `len_pos` — it re-derives the same data-start by
+    /// rounding `len_pos + 4` up to that alignment. Using a different (or
+    /// hardcoded) alignment here would miscount real payload bytes as
+    /// padding for any element type whose alignment isn't 8 (e.g. 1/2/4).
+    pub fn finish_array(&mut self, len_pos: usize, element_alignment: usize) {
+        let mut data_start = len_pos + 4;
+        while !data_start.is_multiple_of(element_alignment) {
             data_start += 1;
         }
-        if data_start > self.data.len() {
-            data_start = len_field_end;
-        }
-        let array_len = (self.data.len() - data_start) as u32;
+        let array_len = self.data.len().saturating_sub(data_start) as u32;
         self.data[len_pos..len_pos + 4].copy_from_slice(&array_len.to_le_bytes());
     }
 
@@ -272,6 +273,32 @@ pub(crate) fn complete_type_len(sig: &str) -> Result<usize, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_finish_array_honors_sub_8_element_alignment() {
+        // start_array(4) on a fresh (empty) buffer records len_pos == 0, so
+        // len_pos + 4 == 4 — NOT 8-aligned. finish_array must round the
+        // data-start up to the *element* alignment (4), not unconditionally
+        // to 8, or it miscounts real payload bytes as padding.
+        let mut buf = MarshalBuffer::new();
+        let len_pos = buf.start_array(4);
+        assert_eq!(len_pos, 0);
+        buf.write_string("ab"); // 4 (len) + 2 (bytes) + 1 (NUL) = 7 bytes, no pad needed (pos 4 is 4-aligned)
+        buf.write_string("cd"); // pos 11 -> pad 1 to reach 12 (4-aligned), then 7 bytes = 8
+        buf.finish_array(len_pos, 4);
+
+        // Actual element bytes written after the 4-byte length prefix: the
+        // data-start for alignment 4 is byte 4 (no padding needed there),
+        // so all 15 bytes after the length field are the array's payload.
+        let expected_len = (buf.data.len() - 4) as u32;
+        assert_eq!(expected_len, 15, "test setup sanity check");
+
+        let written_len = u32::from_le_bytes([buf.data[0], buf.data[1], buf.data[2], buf.data[3]]);
+        assert_eq!(
+            written_len, expected_len,
+            "finish_array must count actual element bytes, not over-count padding for the wrong (8-byte) alignment"
+        );
+    }
 
     #[test]
     fn test_read_variant_skips_unknown_types() {

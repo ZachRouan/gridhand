@@ -169,7 +169,7 @@ fn take_portal_screenshot(conn: &mut DbusConnection) -> Result<String, String> {
     body.write_string("interactive");
     body.write_variant_bool(false);
 
-    body.finish_array(arr_pos);
+    body.finish_array(arr_pos, 8);
 
     let body_bytes = body.into_bytes();
 
