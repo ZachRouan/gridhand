@@ -75,6 +75,17 @@ pub fn parse_between_ref(s: &str) -> Result<CellPair, String> {
     Ok(((col1, row1), (col2, row2)))
 }
 
+/// Half-open pixel span [start, end) of cell `i` of `n` across `total` pixels.
+/// Proportional boundaries floor(i*total/n): cells partition the space exactly
+/// (no unreachable remainder) and stay within 1px of uniform. Crop, click, and
+/// overlay drawing must all derive cell geometry from here — three separate
+/// computations of "cell size" is how the overlay drifted from the click path.
+pub fn cell_span(total: u32, n: u32, i: u32) -> (u32, u32) {
+    let start = (i as u64 * total as u64 / n as u64) as u32;
+    let end = ((i as u64 + 1) * total as u64 / n as u64) as u32;
+    (start, end)
+}
+
 /// Walk a cell chain like "B2.C1" within a WxH pixel space, returning the
 /// center point of the innermost cell (or the boundary midpoint for a
 /// between-cell ref) in that space.
@@ -114,18 +125,17 @@ fn cell_chain_center(
             auto_grid(w as u32, h as u32)
         };
 
-        // Use integer-truncated cell dimensions to match the screenshot crop loop,
-        // which uses u32 division. Float division would drift 1-3px per zoom level.
-        let cell_w_int = (w as u32) / grid_cols;
-        let cell_h_int = (h as u32) / grid_rows;
-        if cell_w_int == 0 || cell_h_int == 0 {
+        // Cell geometry comes from cell_span — the same function the
+        // screenshot crop loop and the overlay renderer use. Any local
+        // re-derivation here WILL drift from what the agent saw drawn.
+        let (probe_w0, probe_w1) = cell_span(w as u32, grid_cols, 0);
+        let (probe_h0, probe_h1) = cell_span(h as u32, grid_rows, 0);
+        if probe_w1 == probe_w0 || probe_h1 == probe_h0 {
             return Err(format!(
                 "Zoom chain '{}' is too deep: cell size reaches zero at level {}. Use fewer levels.",
                 cell_chain, i + 1
             ));
         }
-        let cell_w = cell_w_int as f64;
-        let cell_h = cell_h_int as f64;
 
         if part.contains('+') {
             let ((col1, row1), (col2, row2)) = parse_between_ref(part)?;
@@ -135,11 +145,21 @@ fn cell_chain_center(
                     part, grid_cols, grid_rows
                 ));
             }
-            // Integer midpoint with clamping, matching the screenshot crop loop
-            let mid_x = ((col1 + col2) * cell_w_int / 2).min((w as u32).saturating_sub(cell_w_int));
-            let mid_y = ((row1 + row2) * cell_h_int / 2).min((h as u32).saturating_sub(cell_h_int));
+            let (s1x, e1x) = cell_span(w as u32, grid_cols, col1);
+            let (s2x, _) = cell_span(w as u32, grid_cols, col2);
+            let (s1y, e1y) = cell_span(h as u32, grid_rows, row1);
+            let (s2y, _) = cell_span(h as u32, grid_rows, row2);
+            let span_w = e1x - s1x;
+            let span_h = e1y - s1y;
+            // Integer midpoint of the two cell origins, clamped so a
+            // span_w-wide region starting there stays inside the space —
+            // mirrors the screenshot crop loop exactly.
+            let mid_x = ((s1x + s2x) / 2).min((w as u32).saturating_sub(span_w));
+            let mid_y = ((s1y + s2y) / 2).min((h as u32).saturating_sub(span_h));
             x += mid_x as f64;
             y += mid_y as f64;
+            w = span_w as f64;
+            h = span_h as f64;
         } else {
             let (col, row) = parse_cell_ref(part)?;
             if col >= grid_cols || row >= grid_rows {
@@ -148,11 +168,13 @@ fn cell_chain_center(
                     part, grid_cols, grid_rows
                 ));
             }
-            x += col as f64 * cell_w;
-            y += row as f64 * cell_h;
+            let (sx, ex) = cell_span(w as u32, grid_cols, col);
+            let (sy, ey) = cell_span(h as u32, grid_rows, row);
+            x += sx as f64;
+            y += sy as f64;
+            w = (ex - sx) as f64;
+            h = (ey - sy) as f64;
         }
-        w = cell_w;
-        h = cell_h;
     }
 
     Ok((x + w / 2.0, y + h / 2.0))
@@ -187,6 +209,30 @@ pub fn cell_to_screen_coords(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_cell_span_partitions_exactly() {
+        // Every pixel belongs to exactly one cell: spans tile [0, total).
+        for &(total, n) in &[(95u32, 8u32), (800, 9), (1280, 16), (7, 3), (100, 8)] {
+            let mut covered = 0u32;
+            for i in 0..n {
+                let (start, end) = cell_span(total, n, i);
+                assert_eq!(start, covered, "gap before cell {i} of {n} over {total}");
+                assert!(end > start || total < n, "empty cell {i}");
+                covered = end;
+            }
+            assert_eq!(covered, total, "dead zone after last cell: {covered} != {total}");
+        }
+    }
+
+    #[test]
+    fn test_cell_span_uniformity() {
+        // Neighboring cells differ by at most 1px.
+        let widths: Vec<u32> = (0..8).map(|i| { let (s, e) = cell_span(95, 8, i); e - s }).collect();
+        let min = *widths.iter().min().unwrap();
+        let max = *widths.iter().max().unwrap();
+        assert!(max - min <= 1, "spans not uniform: {widths:?}");
+    }
 
     /// Bounds-space targeting is the img == bounds identity case of
     /// cell_to_screen_coords (the 1:1 fallback used when no screenshot
@@ -370,11 +416,12 @@ mod tests {
     #[test]
     fn test_between_cell_midpoint_matches_crop_math() {
         // Odd cell width: integer midpoint math must match the crop loop
-        // (which floors), not keep the exact .5.
-        // 810x600, 8x6 grid -> cell 101x100. D3+E3: (3+4)*101/2 = 353 (floored).
-        // Center: 353 + 101/2 = 403.5 -> 403.
+        // (proportional spans), not keep the exact .5.
+        // 810x600, 8x6 grid. Spans over width 810/8: col 3 -> (303, 405),
+        // col 4 -> (405, 506). span_w = 405-303 = 102.
+        // mid_x = (303+405)/2 = 354 (floored). Center: 354 + 102/2 = 405.
         let (x, _) = cell_to_screen_coords("D3+E3", 810, 600, 0, 0, 810, 600, Some((8, 6))).unwrap();
-        assert_eq!(x, 403);
+        assert_eq!(x, 405);
     }
 
     #[test]

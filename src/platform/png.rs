@@ -3,6 +3,8 @@
 //! Reads PNG files (decompresses IDAT via inflate, undoes row filters),
 //! crops a rectangular region, and writes a new PNG with deflate-compressed IDAT blocks.
 
+use crate::grid::cell_span;
+
 /// Decoded image data.
 pub struct Image {
     pub width: u32,
@@ -1074,6 +1076,10 @@ pub fn dim_outside(img: &mut Image, rx: u32, ry: u32, rw: u32, rh: u32) {
 /// Draw parent-level grid lines and cell labels in the context (dimmed) area.
 /// This shows the agent which parent cells surround the target, so it can
 /// adjust its cell reference (e.g., switch from D3 to E3).
+/// Neighbor region sizes here are approximated from the target cell's own
+/// span rather than each neighbor's own `cell_span`, so labels in this
+/// dimmed orientation aid can be off by up to 1 source px — acceptable
+/// since this area is not clickable or croppable.
 #[allow(clippy::too_many_arguments)]
 pub fn draw_context_grid(
     img: &mut Image,
@@ -1145,25 +1151,33 @@ pub fn draw_context_grid(
 }
 
 /// Draw grid overlay within a sub-region of the image.
-/// Grid lines, labels, and crosshairs are confined to (rx, ry, rw, rh).
-#[allow(dead_code)]
-pub fn draw_grid_in_region(img: &mut Image, cols: u32, rows: u32, rx: u32, ry: u32, rw: u32, rh: u32) {
-    let cell_w = rw / cols;
-    let cell_h = rh / rows;
+/// Grid lines, labels, and crosshairs are confined to the scaled region
+/// starting at (rx, ry). `tw`/`th` are the **unscaled** target-cell
+/// dimensions and `s` is the integer scale; the region's scaled size is
+/// `tw*s` x `th*s`.
+///
+/// All geometry is computed in unscaled space via `cell_span`, then
+/// multiplied by `s` — identical to the crop/click computation, so drawn
+/// lines sit exactly on the boundaries a subsequent `--cell` crop or mouse
+/// click will use.
+#[allow(dead_code, clippy::too_many_arguments)]
+pub fn draw_grid_in_region(img: &mut Image, cols: u32, rows: u32, rx: u32, ry: u32, tw: u32, th: u32, s: u32) {
+    let rw = tw * s;
+    let rh = th * s;
 
-    let min_cell = cell_w.min(cell_h);
+    let min_cell = (tw / cols).min(th / rows) * s;
     let scale = if min_cell >= 60 { 2u32 } else { 1u32 };
     let pad = if scale == 2 { 5u32 } else { 2u32 };
 
     // Vertical grid lines within region
     for col in 1..cols {
-        let x = rx + col * cell_w;
+        let x = rx + crate::grid::cell_span(tw, cols, col).0 * s;
         draw_vertical_line(img, x, ry, ry + rh);
     }
 
     // Horizontal grid lines within region
     for row in 1..rows {
-        let y = ry + row * cell_h;
+        let y = ry + crate::grid::cell_span(th, rows, row).0 * s;
         draw_horizontal_line(img, rx, rx + rw, y);
     }
 
@@ -1173,8 +1187,11 @@ pub fn draw_grid_in_region(img: &mut Image, cols: u32, rows: u32, rx: u32, ry: u
             let label_col = (b'A' + col as u8) as char;
             let label_row_char = (b'1' + row as u8) as char;
 
-            let lx = rx + col * cell_w + pad;
-            let ly = ry + row * cell_h + pad;
+            let (sx, ex) = cell_span(tw, cols, col);
+            let (sy, ey) = cell_span(th, rows, row);
+
+            let lx = rx + sx * s + pad;
+            let ly = ry + sy * s + pad;
 
             let bg_w = GLYPH_WIDTH * scale * 2 + pad * 2;
             let bg_h = GLYPH_HEIGHT * scale + pad;
@@ -1183,8 +1200,8 @@ pub fn draw_grid_in_region(img: &mut Image, cols: u32, rows: u32, rx: u32, ry: u
             draw_char_scaled(img, label_col, lx + pad, ly + pad / 2, scale);
             draw_char_scaled(img, label_row_char, lx + pad + GLYPH_WIDTH * scale + 1, ly + pad / 2, scale);
 
-            let cx = rx + col * cell_w + cell_w / 2;
-            let cy = ry + row * cell_h + cell_h / 2;
+            let cx = rx + (sx + ex) * s / 2;
+            let cy = ry + (sy + ey) * s / 2;
             let arm = (min_cell * 10 / 100).max(3);
             let thickness = (min_cell * 2 / 100).max(1);
             draw_crosshair(img, cx, cy, arm, thickness);
@@ -1193,6 +1210,9 @@ pub fn draw_grid_in_region(img: &mut Image, cols: u32, rows: u32, rx: u32, ry: u
 }
 
 /// Label scale adapts to cell size: 2x for large cells, 1x for small cells.
+/// All boundary/crosshair/label geometry comes from `cell_span` — the same
+/// function the crop loop and click path use — so the drawn overlay always
+/// lands exactly where a subsequent `--cell` crop or mouse click will.
 #[allow(dead_code)]
 pub fn draw_grid(img: &mut Image, cols: u32, rows: u32) {
     let w = img.width;
@@ -1207,13 +1227,13 @@ pub fn draw_grid(img: &mut Image, cols: u32, rows: u32) {
 
     // Draw vertical grid lines
     for col in 1..cols {
-        let x = col * cell_w;
+        let x = cell_span(w, cols, col).0;
         draw_vertical_line(img, x, 0, h);
     }
 
     // Draw horizontal grid lines
     for row in 1..rows {
-        let y = row * cell_h;
+        let y = cell_span(h, rows, row).0;
         draw_horizontal_line(img, 0, w, y);
     }
 
@@ -1223,8 +1243,11 @@ pub fn draw_grid(img: &mut Image, cols: u32, rows: u32) {
             let label_col = (b'A' + col as u8) as char;
             let label_row_char = (b'1' + row as u8) as char;
 
-            let lx = col * cell_w + pad;
-            let ly = row * cell_h + pad;
+            let (sx, ex) = cell_span(w, cols, col);
+            let (sy, ey) = cell_span(h, rows, row);
+
+            let lx = sx + pad;
+            let ly = sy + pad;
 
             // Draw background rectangle behind label
             let bg_w = GLYPH_WIDTH * scale * 2 + pad * 2;
@@ -1236,8 +1259,8 @@ pub fn draw_grid(img: &mut Image, cols: u32, rows: u32) {
             draw_char_scaled(img, label_row_char, lx + pad + GLYPH_WIDTH * scale + 1, ly + pad / 2, scale);
 
             // Draw crosshair at cell center showing where a click would land
-            let cx = col * cell_w + cell_w / 2;
-            let cy = row * cell_h + cell_h / 2;
+            let cx = sx + (ex - sx) / 2;
+            let cy = sy + (ey - sy) / 2;
             // Scale arm to ~15% of cell size, thickness to ~3% (minimum 1px)
             let arm = (min_cell * 10 / 100).max(3);
             let thickness = (min_cell * 2 / 100).max(1);
@@ -1577,6 +1600,50 @@ mod tests {
         let line_x = 30u32; // 120/4 = 30
         let idx = (40 * 120 * 3 + (line_x + 1) * 3) as usize;
         assert_eq!(img.pixels[idx], 255); // white line center
+    }
+
+    #[test]
+    fn test_overlay_lines_match_cell_span_boundaries() {
+        // 100px-wide/tall target cell scaled 7x in an 8x6 sub-grid — the exact
+        // kind of geometry where the old scaled-space division (rw/cols)
+        // drifted from the unscaled crop/click math by several pixels per
+        // cell. draw_grid_in_region must place every line at cell_span's
+        // boundary in unscaled space, times s.
+        let (tw, th, s, cols, rows) = (100u32, 100u32, 7u32, 8u32, 6u32);
+        let mut img = Image {
+            width: tw * s,
+            height: th * s,
+            bpp: 4,
+            pixels: vec![255u8; (tw * s * th * s * 4) as usize],
+        };
+        draw_grid_in_region(&mut img, cols, rows, 0, 0, tw, th, s);
+
+        // draw_vertical_line/draw_horizontal_line paint the boundary pixel
+        // itself black ([0,0,0,255]), with a white center one pixel over —
+        // so sampling the exact boundary pixel against the all-white
+        // background is enough to detect "a line was drawn here".
+        //
+        // y=70 sits inside row 0's band, below its label rectangle
+        // (y in [5,26]) and clear of every column's crosshair (each
+        // confined to its own cell's y-range), so it is safe to reuse for
+        // every interior column boundary. Symmetrically x=70 sits inside
+        // column 0's band, clear of every row's label and crosshair.
+        for col in 1..cols {
+            let expected_x = cell_span(tw, cols, col).0 * s;
+            let y = 70u32;
+            let idx = (y * tw * s + expected_x) as usize * 4;
+            let px = &img.pixels[idx..idx + 3];
+            assert_ne!(px, &[255u8, 255, 255][..],
+                "no grid line at expected x={expected_x} for col {col}");
+        }
+        for row in 1..rows {
+            let expected_y = cell_span(th, rows, row).0 * s;
+            let x = 70u32;
+            let idx = (expected_y * tw * s + x) as usize * 4;
+            let px = &img.pixels[idx..idx + 3];
+            assert_ne!(px, &[255u8, 255, 255][..],
+                "no grid line at expected y={expected_y} for row {row}");
+        }
     }
 
     #[test]

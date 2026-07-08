@@ -350,50 +350,57 @@ fn cmd_screenshot(args: &[String]) -> Result<String, String> {
                 } else {
                     grid::auto_grid(img.width, img.height)
                 };
-                let cell_w = img.width / cols;
-                let cell_h = img.height / rows;
-                if cell_w == 0 || cell_h == 0 {
+                let (w0, w1) = grid::cell_span(img.width, cols, 0);
+                let (h0, h1) = grid::cell_span(img.height, rows, 0);
+                if w1 == w0 || h1 == h0 {
                     return Err(format!(
                         "Zoom chain '{}' is too deep: cell size reaches zero at level {}. Use fewer levels.",
                         cell_chain, level + 1
                     ));
                 }
 
-                // Parse cell reference — single cell (D3) or between two cells (D3+E3)
-                let (cx, cy, single_cell) = if part.contains('+') {
+                let (cx, cy, cw, ch, single_cell) = if part.contains('+') {
                     let ((c1, r1), (c2, r2)) = grid::parse_between_ref(part)?;
                     if c1 >= cols || r1 >= rows || c2 >= cols || r2 >= rows {
                         return Err(format!("Cell '{}' out of range for {}x{} grid", part, cols, rows));
                     }
-                    let cx = ((c1 + c2) * cell_w / 2).min(img.width.saturating_sub(cell_w));
-                    let cy = ((r1 + r2) * cell_h / 2).min(img.height.saturating_sub(cell_h));
-                    (cx, cy, None)
+                    let (s1x, e1x) = grid::cell_span(img.width, cols, c1);
+                    let (s2x, _) = grid::cell_span(img.width, cols, c2);
+                    let (s1y, e1y) = grid::cell_span(img.height, rows, r1);
+                    let (s2y, _) = grid::cell_span(img.height, rows, r2);
+                    let cw = e1x - s1x;
+                    let ch = e1y - s1y;
+                    let cx = ((s1x + s2x) / 2).min(img.width.saturating_sub(cw));
+                    let cy = ((s1y + s2y) / 2).min(img.height.saturating_sub(ch));
+                    (cx, cy, cw, ch, None)
                 } else {
                     let (col, row) = grid::parse_cell_ref(part)?;
                     if col >= cols || row >= rows {
                         return Err(format!("Cell '{}' out of range for {}x{} grid", part, cols, rows));
                     }
-                    (col * cell_w, row * cell_h, Some((col, row)))
+                    let (sx, ex) = grid::cell_span(img.width, cols, col);
+                    let (sy, ey) = grid::cell_span(img.height, rows, row);
+                    (sx, sy, ex - sx, ey - sy, Some((col, row)))
                 };
 
                 if is_last {
                     // Final level: crop with context padding (full cell on each side)
-                    let pad_x = cell_w;
-                    let pad_y = cell_h;
+                    let pad_x = cw;
+                    let pad_y = ch;
                     let crop_x = cx.saturating_sub(pad_x);
                     let crop_y = cy.saturating_sub(pad_y);
-                    let crop_r = (cx + cell_w + pad_x).min(img.width);
-                    let crop_b = (cy + cell_h + pad_y).min(img.height);
+                    let crop_r = (cx + cw + pad_x).min(img.width);
+                    let crop_b = (cy + ch + pad_y).min(img.height);
                     let offset_x = cx - crop_x;
                     let offset_y = cy - crop_y;
-                    target_region = Some((offset_x, offset_y, cell_w, cell_h));
+                    target_region = Some((offset_x, offset_y, cw, ch));
                     if let Some((col, row)) = single_cell {
                         parent_cell = Some((col, row, cols, rows));
                     }
                     img = platform::png::crop(&img, crop_x, crop_y, crop_r - crop_x, crop_b - crop_y)?;
                 } else {
                     // Intermediate level: exact crop
-                    img = platform::png::crop(&img, cx, cy, cell_w, cell_h)?;
+                    img = platform::png::crop(&img, cx, cy, cw, ch)?;
                 }
             }
         }
@@ -417,7 +424,7 @@ fn cmd_screenshot(args: &[String]) -> Result<String, String> {
 
             // Draw sub-grid within the target cell region (coarser than initial grid)
             let gr = grid.unwrap_or_else(|| grid::auto_grid_zoom(stw, sth));
-            platform::png::draw_grid_in_region(&mut img, gr.0, gr.1, sox, soy, stw, sth);
+            platform::png::draw_grid_in_region(&mut img, gr.0, gr.1, sox, soy, tw, th, s);
             gr
         } else {
             let gr = grid.unwrap_or_else(|| grid::auto_grid(img.width, img.height));
