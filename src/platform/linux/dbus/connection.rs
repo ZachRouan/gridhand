@@ -1,5 +1,6 @@
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
+use std::time::Instant;
 
 use super::auth;
 use super::message;
@@ -9,6 +10,11 @@ use super::types::MarshalBuffer;
 /// answer in milliseconds; anything past this means the peer is wedged, and
 /// blocking forever would wedge the calling agent with us.
 const METHOD_CALL_TIMEOUT_MS: u64 = 10_000;
+
+/// D-Bus specifies 128 MiB as the maximum message length. A rogue or
+/// corrupted peer that claims a multi-gigabyte fields/body length must
+/// produce a JSON error, not an OOM-abort from a giant `vec![0u8; n]`.
+const MAX_MESSAGE_SIZE: usize = 128 * 1024 * 1024;
 
 #[allow(dead_code)]
 pub struct DbusConnection {
@@ -186,38 +192,31 @@ impl DbusConnection {
     }
 
     /// Read one message, giving up (with an error containing "timed out")
-    /// once the deadline passes. The read timeout is re-armed with the
-    /// remaining time before each read so the total wait honors the deadline.
+    /// once the deadline passes. Delegates the per-read timeout arming to
+    /// `read_exact_deadline` for each of the message's four reads, so a
+    /// peer that drips bytes slowly cannot stretch a single message past
+    /// the deadline (see that function's doc comment).
     fn read_next_message_before(&mut self, deadline: std::time::Instant) -> Result<Reply, String> {
-        let now = std::time::Instant::now();
-        if now >= deadline {
+        if std::time::Instant::now() >= deadline {
             return Err("D-Bus read timed out".to_string());
         }
-        self.stream.set_read_timeout(Some(deadline - now))
-            .map_err(|e| format!("Failed to set read timeout: {}", e))?;
-        self.read_next_message()
+        self.read_next_message(deadline)
     }
 
-    fn read_exact_or_timeout(&mut self, buf: &mut [u8], what: &str) -> Result<(), String> {
-        self.stream.read_exact(buf).map_err(|e| match e.kind() {
-            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => {
-                "D-Bus read timed out".to_string()
-            }
-            _ => format!("Failed to read {}: {}", what, e),
-        })
-    }
-
-    fn read_next_message(&mut self) -> Result<Reply, String> {
+    fn read_next_message(&mut self, deadline: std::time::Instant) -> Result<Reply, String> {
         let mut header_buf = [0u8; 16];
-        self.read_exact_or_timeout(&mut header_buf, "D-Bus message header")?;
+        read_exact_deadline(&mut self.stream, &mut header_buf, deadline)?;
 
         let fields_len = u32::from_le_bytes([
             header_buf[12], header_buf[13], header_buf[14], header_buf[15]
         ]) as usize;
+        if fields_len > MAX_MESSAGE_SIZE {
+            return Err(format!("D-Bus message too large: {} bytes", fields_len));
+        }
 
         let mut fields_buf = vec![0u8; fields_len];
         if fields_len > 0 {
-            self.read_exact_or_timeout(&mut fields_buf, "header fields")?;
+            read_exact_deadline(&mut self.stream, &mut fields_buf, deadline)?;
         }
 
         let total_header = 16 + fields_len;
@@ -225,7 +224,7 @@ impl DbusConnection {
         let padding = padded_header - total_header;
         if padding > 0 {
             let mut pad = vec![0u8; padding];
-            self.read_exact_or_timeout(&mut pad, "header padding")?;
+            read_exact_deadline(&mut self.stream, &mut pad, deadline)?;
         }
 
         let mut full_header = Vec::with_capacity(16 + fields_len);
@@ -235,45 +234,44 @@ impl DbusConnection {
         let (header, _) = message::parse_header(&full_header)?;
 
         let body_len = header.body_len as usize;
+        if body_len > MAX_MESSAGE_SIZE {
+            return Err(format!("D-Bus message too large: {} bytes", body_len));
+        }
         let mut body = vec![0u8; body_len];
         if body_len > 0 {
-            self.read_exact_or_timeout(&mut body, "message body")?;
+            read_exact_deadline(&mut self.stream, &mut body, deadline)?;
         }
 
         Ok(Reply { header, body })
     }
 }
 
+/// read_exact with a hard deadline: re-arms the socket timeout from the
+/// remaining budget before every read() and checks the clock between
+/// reads, so a drip-feeding peer cannot stretch one message past the
+/// deadline (read_exact alone resets the timeout with every byte).
+fn read_exact_deadline(stream: &mut UnixStream, buf: &mut [u8], deadline: Instant) -> Result<(), String> {
+    let mut filled = 0;
+    while filled < buf.len() {
+        let remaining = deadline.checked_duration_since(Instant::now())
+            .ok_or("D-Bus read timed out")?;
+        stream.set_read_timeout(Some(remaining)).map_err(|e| e.to_string())?;
+        match stream.read(&mut buf[filled..]) {
+            Ok(0) => return Err("D-Bus connection closed mid-message".to_string()),
+            Ok(n) => filled += n,
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock
+                   || e.kind() == std::io::ErrorKind::TimedOut =>
+                return Err("D-Bus read timed out".to_string()),
+            Err(e) => return Err(format!("D-Bus read error: {}", e)),
+        }
+    }
+    Ok(())
+}
+
 #[allow(dead_code)]
 pub struct Reply {
     pub header: message::MessageHeader,
     pub body: Vec<u8>,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_call_method_times_out_on_silent_peer() {
-        // A peer that never replies must produce a timeout error, not block
-        // this process (and the agent driving it) forever.
-        let (local, _remote) = UnixStream::pair().unwrap();
-        let mut conn = DbusConnection {
-            stream: local,
-            serial: 0,
-            unique_name: String::new(),
-        };
-
-        let start = std::time::Instant::now();
-        let result = conn.call_method_with_timeout(
-            "org.example", "/", "org.example", "Ping", None, &[], 200,
-        );
-        assert!(result.is_err(), "silent peer must yield an error");
-        let err = result.err().unwrap();
-        assert!(err.contains("timed out"), "error must mention timeout, got: {}", err);
-        assert!(start.elapsed().as_millis() < 5_000, "must return promptly");
-    }
 }
 
 /// Connect to the session bus. DBUS_SESSION_BUS_ADDRESS is a ';'-separated
@@ -308,4 +306,61 @@ fn connect_session_bus() -> Result<UnixStream, String> {
         }
     }
     Err(format!("Failed to connect to D-Bus session bus ({})", last_err))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_call_method_times_out_on_silent_peer() {
+        // A peer that never replies must produce a timeout error, not block
+        // this process (and the agent driving it) forever.
+        let (local, _remote) = UnixStream::pair().unwrap();
+        let mut conn = DbusConnection {
+            stream: local,
+            serial: 0,
+            unique_name: String::new(),
+        };
+
+        let start = std::time::Instant::now();
+        let result = conn.call_method_with_timeout(
+            "org.example", "/", "org.example", "Ping", None, &[], 200,
+        );
+        assert!(result.is_err(), "silent peer must yield an error");
+        let err = result.err().unwrap();
+        assert!(err.contains("timed out"), "error must mention timeout, got: {}", err);
+        assert!(start.elapsed().as_millis() < 5_000, "must return promptly");
+    }
+
+    #[test]
+    fn test_read_exact_deadline_trips_on_drip_feeding_peer() {
+        // read_exact alone resets its OS-level read timeout on every byte
+        // received, so a peer sending 1 byte per 200ms against a 500ms
+        // per-read timeout would never itself time out even though the
+        // *message* deadline has long passed. read_exact_deadline must
+        // check the wall clock against the deadline on every iteration,
+        // not just once per call, so the drip cannot outlast the deadline.
+        let (mut local, mut remote) = UnixStream::pair().unwrap();
+        let writer = std::thread::spawn(move || {
+            for _ in 0..10 {
+                std::thread::sleep(std::time::Duration::from_millis(200));
+                if remote.write_all(&[0u8]).is_err() {
+                    return;
+                }
+            }
+        });
+
+        let deadline = Instant::now() + std::time::Duration::from_millis(500);
+        let mut buf = [0u8; 10];
+        let start = Instant::now();
+        let result = read_exact_deadline(&mut local, &mut buf, deadline);
+        assert!(result.is_err(), "drip-fed read must time out, not eventually succeed");
+        let err = result.err().unwrap();
+        assert!(err.contains("timed out"), "error must mention timeout, got: {}", err);
+        assert!(start.elapsed().as_millis() < 2_000, "must not wait past ~2s in this test");
+
+        drop(local);
+        let _ = writer.join();
+    }
 }

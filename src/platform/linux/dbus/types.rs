@@ -221,7 +221,8 @@ impl<'a> UnmarshalBuffer<'a> {
             }
             b'(' | b'{' => {
                 self.align(8);
-                let inner = &sig[1..sig.len().saturating_sub(1)];
+                let inner = sig.get(1..sig.len().wrapping_sub(1))
+                    .ok_or_else(|| format!("Malformed container signature '{}'", sig))?;
                 let mut rest = inner;
                 while !rest.is_empty() {
                     let n = complete_type_len(rest)?;
@@ -286,6 +287,16 @@ mod tests {
         let mut ubuf = UnmarshalBuffer::new(&bytes);
         assert_eq!(ubuf.read_variant_string().unwrap(), None);
         assert_eq!(ubuf.read_string().unwrap(), "after");
+    }
+
+    #[test]
+    fn test_skip_value_malformed_container_signature_errors_not_panics() {
+        // A single "(" has no matching close: sig.len() - 1 == 0, so slicing
+        // sig[1..0] (start > end) must not panic the whole read loop over a
+        // rogue/buggy peer's D-Bus reply.
+        let mut ubuf = UnmarshalBuffer::new(&[]);
+        let result = ubuf.skip_value("(", 0);
+        assert!(result.is_err(), "malformed container signature must error, not panic");
     }
 
     #[test]

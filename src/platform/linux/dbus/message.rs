@@ -265,7 +265,8 @@ fn skip_value(data: &[u8], mut pos: usize, sig: &str, depth: u8) -> Result<usize
         }
         b'(' | b'{' => {
             pos = align(pos, 8);
-            let inner = &sig[1..sig.len() - 1];
+            let inner = sig.get(1..sig.len().wrapping_sub(1))
+                .ok_or_else(|| format!("Malformed container signature '{}'", sig))?;
             let mut rest = inner;
             while !rest.is_empty() {
                 let tlen = complete_type_len(rest)?;
@@ -294,6 +295,15 @@ mod tests {
         data.extend_from_slice(&(fields.len() as u32).to_le_bytes());
         data.extend_from_slice(fields);
         data
+    }
+
+    #[test]
+    fn test_skip_value_malformed_container_signature_errors_not_panics() {
+        // A single "(" has no matching close: sig.len() - 1 == 0, so slicing
+        // sig[1..0] (start > end) must not panic the header-field skip path
+        // when a peer sends a malformed unknown-field signature.
+        let result = skip_value(&[], 0, "(", 0);
+        assert!(result.is_err(), "malformed container signature must error, not panic");
     }
 
     #[test]
