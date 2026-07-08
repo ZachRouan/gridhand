@@ -35,7 +35,13 @@ if [ "$OS" = "Linux" ]; then
         echo "udev rule already exists."
     fi
 
-    if ! groups | grep -q input; then
+    if [ ! -e /dev/uinput ]; then
+        echo "Loading uinput kernel module..."
+        sudo modprobe uinput
+        echo uinput | sudo tee /etc/modules-load.d/uinput.conf >/dev/null
+    fi
+
+    if ! groups | grep -qw input; then
         if sudo usermod -aG input "$REAL_USER"; then
             echo "Added $REAL_USER to 'input' group. You must log out and back in for this to take effect."
         else
@@ -56,15 +62,17 @@ if [ "$OS" = "Linux" ]; then
     else
         TMP_DIR="$(mktemp -d /tmp/window-calls-XXXXXX)"
         echo "Downloading window-calls extension from GitHub..."
-        if curl -sL "https://github.com/ickyicky/window-calls/archive/refs/heads/main.tar.gz" -o "$TMP_DIR/ext.tar.gz" 2>/dev/null; then
+        if curl -fsSL "https://github.com/ickyicky/window-calls/archive/refs/heads/main.tar.gz" -o "$TMP_DIR/ext.tar.gz" 2>/dev/null; then
             tar -xzf "$TMP_DIR/ext.tar.gz" -C "$TMP_DIR"
             EXT_SRC="$TMP_DIR/window-calls-main"
             if [ -d "$EXT_SRC" ] && [ -f "$EXT_SRC/metadata.json" ]; then
                 (cd "$EXT_SRC" && zip -qr "$TMP_DIR/ext.zip" .)
-                gnome-extensions install "$TMP_DIR/ext.zip" && gnome-extensions enable "$EXT_UUID" 2>/dev/null; echo "window-calls extension installed and enabled." || {
+                if gnome-extensions install "$TMP_DIR/ext.zip" && gnome-extensions enable "$EXT_UUID" 2>/dev/null; then
+                    echo "window-calls extension installed and enabled."
+                else
                     echo "Failed to install extension. Try manually from:"
                     echo "  https://github.com/ickyicky/window-calls"
-                }
+                fi
             else
                 echo "Unexpected archive layout. Install manually from:"
                 echo "  https://github.com/ickyicky/window-calls"
