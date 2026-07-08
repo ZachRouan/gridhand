@@ -1,6 +1,9 @@
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
 #![allow(dead_code)]
+// Win32 type names (HWND, HDC, BOOL, ...) are kept verbatim to match the
+// Windows SDK rather than renamed to satisfy Rust naming conventions.
+#![allow(clippy::upper_case_acronyms)]
 
 use std::ffi::c_void;
 
@@ -209,6 +212,13 @@ unsafe extern "system" {
                      bits: *mut u8, bmi: *mut BITMAPINFO, usage: u32) -> i32;
     pub fn DeleteDC(hdc: HDC) -> BOOL;
     pub fn DeleteObject(ho: HGDIOBJ) -> BOOL;
+}
+
+// --- kernel32.dll (dynamic loading for APIs newer than the linked baseline) ---
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    pub fn GetModuleHandleA(lpModuleName: *const u8) -> *mut c_void;
+    pub fn GetProcAddress(hModule: *mut c_void, lpProcName: *const u8) -> *mut c_void;
 }
 
 // --- Helpers ---
