@@ -1,3 +1,4 @@
+use std::ffi::c_void;
 use crate::json::{self, JsonValue};
 use super::ffi::*;
 
@@ -7,7 +8,12 @@ pub fn list_windows() -> Result<String, String> {
 
     for info in &infos {
         let win = JsonValue::Object(vec![
-            ("id", JsonValue::Int(info.hwnd as i64)),
+            // HWNDs are 32-bit values sign-extended into the pointer's upper
+            // bits on x64; truncate to u32 before widening to i64 so a
+            // handle with bit 31 set still serializes as a non-negative
+            // number (`--window-id` parses as u64 and rejects a negative
+            // string).
+            ("id", JsonValue::Int((info.hwnd as usize as u32) as i64)),
             ("title", JsonValue::OwnedStr(info.title.clone())),
             ("pid", JsonValue::Int(info.pid as i64)),
             ("x", JsonValue::Int(info.rect.left as i64)),
@@ -25,9 +31,19 @@ pub fn list_windows() -> Result<String, String> {
 }
 
 pub fn raise_window(id: u64) -> Result<String, String> {
-    let hwnd = id as HWND;
+    let hwnd = id_to_hwnd(id);
 
-    // Alt-key hack: briefly press Alt to unlock SetForegroundWindow
+    // A minimized window can never be the foreground window, so the
+    // IsIconic/SW_RESTORE path below still runs whenever it's actually
+    // needed even though we return early here.
+    if unsafe { GetForegroundWindow() } == hwnd {
+        return Ok(json::success());
+    }
+
+    // Alt-key hack: briefly press Alt to unlock SetForegroundWindow. Only
+    // reachable when the target isn't already foreground — on an
+    // already-foreground window this arms the menu bar and the next
+    // keystroke navigates the menu instead of typing.
     let alt_down = keyboard_input(VK_MENU, 0);
     let alt_up = keyboard_input(VK_MENU, KEYEVENTF_KEYUP);
     unsafe {
@@ -58,22 +74,33 @@ pub fn find_window_by_title(title: &str) -> Result<Option<(u64, String)>, String
 
     for info in &infos {
         if info.title.to_lowercase().contains(&title_lower) {
-            return Ok(Some((info.hwnd as u64, info.title.clone())));
+            return Ok(Some((info.hwnd, info.title.clone())));
         }
     }
 
     Ok(None)
 }
 
-/// Get window bounds by HWND.
+/// Get window bounds by id.
 pub fn get_window_rect(id: u64) -> Result<RECT, String> {
-    let hwnd = id as HWND;
+    let hwnd = id_to_hwnd(id);
     let mut rect = RECT::default();
     let ok = unsafe { GetWindowRect(hwnd, &mut rect) };
     if ok == 0 {
         return Err(format!("Failed to get window rect (id={})", id));
     }
     Ok(rect)
+}
+
+/// Reconstruct an HWND from a CLI/JSON-round-tripped u64 id. HWNDs are
+/// 32-bit values sign-extended into the pointer's upper bits on x64;
+/// truncating to u32 first discards any high-bit noise picked up on the way
+/// through JSON, then re-sign-extending through i32 reconstructs the same
+/// pointer GetForegroundWindow/EnumWindows handed us, including for handles
+/// with bit 31 set. Ids at or below u32::MAX round-trip identically to a
+/// plain cast.
+fn id_to_hwnd(id: u64) -> HWND {
+    id as u32 as i32 as isize as HWND
 }
 
 // --- Internal ---
@@ -95,6 +122,19 @@ fn enum_visible_windows() -> Vec<WindowInfo> {
             // Skip invisible windows
             if IsWindowVisible(hwnd) == 0 {
                 return 1;
+            }
+
+            // Skip DWM-cloaked windows: suspended UWP ghosts / windows
+            // parked on another virtual desktop report IsWindowVisible true
+            // but are cloaked, and would otherwise show up as raisable,
+            // clickable phantoms.
+            let mut cloaked: u32 = 0;
+            if DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED,
+                &mut cloaked as *mut u32 as *mut c_void,
+                std::mem::size_of::<u32>() as u32) == 0
+                && cloaked != 0
+            {
+                return 1; // suspended UWP ghosts / other virtual desktops
             }
 
             // Skip windows with no title

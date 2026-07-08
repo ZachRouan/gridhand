@@ -198,6 +198,7 @@ unsafe extern "system" {
     pub fn ShowWindow(hWnd: HWND, nCmdShow: i32) -> BOOL;
     pub fn IsIconic(hWnd: HWND) -> BOOL;
     pub fn SetProcessDPIAware() -> BOOL;
+    pub fn GetForegroundWindow() -> HWND;
 }
 
 // --- gdi32.dll ---
@@ -221,6 +222,14 @@ unsafe extern "system" {
     pub fn GetModuleHandleA(lpModuleName: *const u8) -> *mut c_void;
     pub fn GetProcAddress(hModule: *mut c_void, lpProcName: *const u8) -> *mut c_void;
 }
+
+// --- dwmapi.dll ---
+#[link(name = "dwmapi")]
+unsafe extern "system" {
+    pub fn DwmGetWindowAttribute(hwnd: HWND, dwAttribute: u32, pvAttribute: *mut c_void, cbAttribute: u32) -> i32;
+}
+
+pub const DWMWA_CLOAKED: u32 = 14;
 
 // --- Helpers ---
 
