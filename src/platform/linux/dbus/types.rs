@@ -150,6 +150,45 @@ impl<'a> UnmarshalBuffer<'a> {
         Ok(v)
     }
 
+    pub fn read_i32(&mut self) -> Result<i32, String> {
+        self.align(4);
+        if self.pos + 4 > self.data.len() {
+            return Err("Unexpected end of data reading i32".to_string());
+        }
+        let v = i32::from_le_bytes([
+            self.data[self.pos],
+            self.data[self.pos + 1],
+            self.data[self.pos + 2],
+            self.data[self.pos + 3],
+        ]);
+        self.pos += 4;
+        Ok(v)
+    }
+
+    pub fn read_double(&mut self) -> Result<f64, String> {
+        self.align(8);
+        if self.pos + 8 > self.data.len() {
+            return Err("Unexpected end of data reading double".to_string());
+        }
+        let bits = u64::from_le_bytes([
+            self.data[self.pos],
+            self.data[self.pos + 1],
+            self.data[self.pos + 2],
+            self.data[self.pos + 3],
+            self.data[self.pos + 4],
+            self.data[self.pos + 5],
+            self.data[self.pos + 6],
+            self.data[self.pos + 7],
+        ]);
+        self.pos += 8;
+        Ok(f64::from_bits(bits))
+    }
+
+    /// D-Bus BOOLEAN is wire-encoded as a 4-byte-aligned UINT32 (0 or 1).
+    pub fn read_bool(&mut self) -> Result<bool, String> {
+        Ok(self.read_u32()? != 0)
+    }
+
     pub fn read_string(&mut self) -> Result<String, String> {
         self.align(4);
         let len = self.read_u32()? as usize;
@@ -198,8 +237,10 @@ impl<'a> UnmarshalBuffer<'a> {
     }
 
     /// Skip one complete value of the given signature. Bounds-checked so
-    /// malformed data errors instead of panicking.
-    fn skip_value(&mut self, sig: &str, depth: u8) -> Result<(), String> {
+    /// malformed data errors instead of panicking. `pub` (not just
+    /// crate-internal) so callers like `display.rs` can skip dict/struct
+    /// fields they don't need without duplicating this walk.
+    pub fn skip_value(&mut self, sig: &str, depth: u8) -> Result<(), String> {
         if depth > 32 {
             return Err("D-Bus signature nesting too deep".to_string());
         }
@@ -298,6 +339,60 @@ mod tests {
             written_len, expected_len,
             "finish_array must count actual element bytes, not over-count padding for the wrong (8-byte) alignment"
         );
+    }
+
+    #[test]
+    fn test_read_i32_roundtrip_including_negative() {
+        let mut buf = MarshalBuffer::new();
+        buf.write_i32(-42);
+        buf.write_i32(1_000_000);
+        let bytes = buf.into_bytes();
+
+        let mut ubuf = UnmarshalBuffer::new(&bytes);
+        assert_eq!(ubuf.read_i32().unwrap(), -42);
+        assert_eq!(ubuf.read_i32().unwrap(), 1_000_000);
+    }
+
+    #[test]
+    fn test_read_i32_truncated_errors_not_panics() {
+        let bytes = [1u8, 2, 3]; // 3 bytes, need 4
+        let mut ubuf = UnmarshalBuffer::new(&bytes);
+        assert!(ubuf.read_i32().is_err());
+    }
+
+    #[test]
+    fn test_read_double_roundtrip() {
+        // MarshalBuffer has no write_double helper; write raw aligned bytes
+        // the same way the existing variant-skip test does.
+        let mut buf = MarshalBuffer::new();
+        buf.align(8);
+        buf.data.extend_from_slice(&1.5f64.to_le_bytes());
+        buf.align(8);
+        buf.data.extend_from_slice(&(-3.25f64).to_le_bytes());
+        let bytes = buf.into_bytes();
+
+        let mut ubuf = UnmarshalBuffer::new(&bytes);
+        assert_eq!(ubuf.read_double().unwrap(), 1.5);
+        assert_eq!(ubuf.read_double().unwrap(), -3.25);
+    }
+
+    #[test]
+    fn test_read_double_truncated_errors_not_panics() {
+        let bytes = [0u8; 4]; // need 8
+        let mut ubuf = UnmarshalBuffer::new(&bytes);
+        assert!(ubuf.read_double().is_err());
+    }
+
+    #[test]
+    fn test_read_bool_roundtrip() {
+        let mut buf = MarshalBuffer::new();
+        buf.write_boolean(true);
+        buf.write_boolean(false);
+        let bytes = buf.into_bytes();
+
+        let mut ubuf = UnmarshalBuffer::new(&bytes);
+        assert!(ubuf.read_bool().unwrap());
+        assert!(!ubuf.read_bool().unwrap());
     }
 
     #[test]

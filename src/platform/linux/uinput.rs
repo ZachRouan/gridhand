@@ -169,9 +169,17 @@ fn parse_mode(s: &str) -> Option<(i32, i32)> {
     Some((w.trim().parse().ok()?, h.trim().parse().ok()?))
 }
 
-/// Detect total screen dimensions by reading connected DRM outputs from sysfs.
-/// Falls back to framebuffer virtual_size, then to 1920x1080.
+/// Detect total screen dimensions. Tries Mutter's DisplayConfig first (the
+/// compositor's own logical layout — correct for mirrored/rotated/stacked
+/// monitors and fractional scale), then falls back to the DRM-sysfs
+/// heuristic below for non-GNOME desktops, then to framebuffer
+/// virtual_size, then to 1920x1080.
 fn detect_screen_size() -> (i32, i32) {
+    if let Some((w, h)) = super::display::logical_desktop_size()
+        && w > 0 && h > 0 {
+            return (w, h);
+        }
+
     // Try DRM sysfs: /sys/class/drm/card*-*/status + modes
     if let Ok(entries) = std::fs::read_dir("/sys/class/drm") {
         let mut total_width: i32 = 0;

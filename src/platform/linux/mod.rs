@@ -6,6 +6,7 @@ compile_error!(
 
 mod uinput;
 mod dbus;
+mod display;
 mod screenshot;
 mod windows;
 
