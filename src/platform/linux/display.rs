@@ -209,6 +209,99 @@ mod tests {
         buf.data.extend_from_slice(&v.to_le_bytes());
     }
 
+    /// One physical monitor's connector name and current-mode size, for
+    /// [`build_reply_multi`].
+    struct MonitorSpec<'a> {
+        connector: &'a str,
+        mode_w: i32,
+        mode_h: i32,
+    }
+
+    /// One logical monitor's placement/scale/transform/assignment, for
+    /// [`build_reply_multi`].
+    struct LogicalSpec<'a> {
+        x: i32,
+        y: i32,
+        scale: f64,
+        transform: u32,
+        assign_connector: Option<&'a str>,
+    }
+
+    /// Build a synthetic GetCurrentState reply body for N monitors (each
+    /// with one current mode) and N logical monitors. The two arrays are
+    /// independent lengths: a mirrored layout has more logical monitors
+    /// than physical monitors, all assigned to different connectors but
+    /// sharing an origin.
+    fn build_reply_multi(monitors: &[MonitorSpec], logicals: &[LogicalSpec]) -> Vec<u8> {
+        let mut buf = MarshalBuffer::new();
+        buf.write_u32(1); // serial
+
+        // monitors: a((ssss)a(siiddada{sv})a{sv})
+        let monitors_pos = buf.start_array(8);
+        for m in monitors {
+            buf.align_struct();
+            // (ssss)
+            buf.align_struct();
+            buf.write_string(m.connector);
+            buf.write_string("VEN");
+            buf.write_string("PROD");
+            buf.write_string("SER");
+            // a(siiddada{sv}) modes — one mode, marked current
+            let modes_pos = buf.start_array(8);
+            buf.align_struct();
+            buf.write_string("mode-id");
+            buf.write_i32(m.mode_w);
+            buf.write_i32(m.mode_h);
+            push_double(&mut buf, 60.0); // refresh
+            push_double(&mut buf, 1.0); // preferred_scale
+            // ad supported_scales (empty)
+            let scales_pos = buf.start_array(8);
+            buf.finish_array(scales_pos, 8);
+            // a{sv} mode props: { "is-current": true }
+            let mode_props_pos = buf.start_array(8);
+            buf.align_struct();
+            buf.write_string("is-current");
+            buf.write_variant_bool(true);
+            buf.finish_array(mode_props_pos, 8);
+            buf.finish_array(modes_pos, 8);
+            // a{sv} monitor props (empty)
+            let monitor_props_pos = buf.start_array(8);
+            buf.finish_array(monitor_props_pos, 8);
+        }
+        buf.finish_array(monitors_pos, 8);
+
+        // logical_monitors: a(iiduba(ssss)a{sv})
+        let logical_pos = buf.start_array(8);
+        for l in logicals {
+            buf.align_struct();
+            buf.write_i32(l.x);
+            buf.write_i32(l.y);
+            push_double(&mut buf, l.scale);
+            buf.write_u32(l.transform);
+            buf.write_boolean(true); // primary
+            // a(ssss) assigned
+            let assigned_pos = buf.start_array(8);
+            if let Some(ac) = l.assign_connector {
+                buf.align_struct();
+                buf.write_string(ac);
+                buf.write_string("VEN");
+                buf.write_string("PROD");
+                buf.write_string("SER");
+            }
+            buf.finish_array(assigned_pos, 8);
+            // a{sv} logical monitor props (empty)
+            let lprops_pos = buf.start_array(8);
+            buf.finish_array(lprops_pos, 8);
+        }
+        buf.finish_array(logical_pos, 8);
+
+        // top-level a{sv} properties (empty)
+        let tprops_pos = buf.start_array(8);
+        buf.finish_array(tprops_pos, 8);
+
+        buf.into_bytes()
+    }
+
     /// Build a synthetic GetCurrentState reply body for one monitor with
     /// one (current) mode, and one logical monitor covering it at the
     /// given origin/scale/transform.
@@ -223,69 +316,10 @@ mod tests {
         transform: u32,
         assign_connector: Option<&str>,
     ) -> Vec<u8> {
-        let mut buf = MarshalBuffer::new();
-        buf.write_u32(1); // serial
-
-        // monitors: a((ssss)a(siiddada{sv})a{sv})
-        let monitors_pos = buf.start_array(8);
-        buf.align_struct();
-        // (ssss)
-        buf.align_struct();
-        buf.write_string(connector);
-        buf.write_string("VEN");
-        buf.write_string("PROD");
-        buf.write_string("SER");
-        // a(siiddada{sv}) modes — one mode, marked current
-        let modes_pos = buf.start_array(8);
-        buf.align_struct();
-        buf.write_string("mode-id");
-        buf.write_i32(mode_w);
-        buf.write_i32(mode_h);
-        push_double(&mut buf, 60.0); // refresh
-        push_double(&mut buf, 1.0); // preferred_scale
-        // ad supported_scales (empty)
-        let scales_pos = buf.start_array(8);
-        buf.finish_array(scales_pos, 8);
-        // a{sv} mode props: { "is-current": true }
-        let mode_props_pos = buf.start_array(8);
-        buf.align_struct();
-        buf.write_string("is-current");
-        buf.write_variant_bool(true);
-        buf.finish_array(mode_props_pos, 8);
-        buf.finish_array(modes_pos, 8);
-        // a{sv} monitor props (empty)
-        let monitor_props_pos = buf.start_array(8);
-        buf.finish_array(monitor_props_pos, 8);
-        buf.finish_array(monitors_pos, 8);
-
-        // logical_monitors: a(iiduba(ssss)a{sv})
-        let logical_pos = buf.start_array(8);
-        buf.align_struct();
-        buf.write_i32(x);
-        buf.write_i32(y);
-        push_double(&mut buf, scale);
-        buf.write_u32(transform);
-        buf.write_boolean(true); // primary
-        // a(ssss) assigned
-        let assigned_pos = buf.start_array(8);
-        if let Some(ac) = assign_connector {
-            buf.align_struct();
-            buf.write_string(ac);
-            buf.write_string("VEN");
-            buf.write_string("PROD");
-            buf.write_string("SER");
-        }
-        buf.finish_array(assigned_pos, 8);
-        // a{sv} logical monitor props (empty)
-        let lprops_pos = buf.start_array(8);
-        buf.finish_array(lprops_pos, 8);
-        buf.finish_array(logical_pos, 8);
-
-        // top-level a{sv} properties (empty)
-        let tprops_pos = buf.start_array(8);
-        buf.finish_array(tprops_pos, 8);
-
-        buf.into_bytes()
+        build_reply_multi(
+            &[MonitorSpec { connector, mode_w, mode_h }],
+            &[LogicalSpec { x, y, scale, transform, assign_connector }],
+        )
     }
 
     #[test]
@@ -315,6 +349,45 @@ mod tests {
         // yields an extent of (3840, 1080), matching a side-by-side layout.
         let body = build_reply("DP-1", 1920, 1080, 1920, 0, 1.0, 0, Some("DP-1"));
         assert_eq!(parse_current_state(&body).unwrap(), Some((3840, 1080)));
+    }
+
+    #[test]
+    fn test_parse_current_state_max_folds_across_reversed_logical_monitors() {
+        // Two side-by-side 1920x1080 monitors, with the logical_monitors
+        // array listing the rightmost monitor (x=1920) FIRST. The extent
+        // must be the max-fold over all logical monitors, not "last one
+        // wins": a last-wins bug would process DP-1 (x=0) last and return
+        // (1920, 1080) instead of the correct (3840, 1080).
+        let body = build_reply_multi(
+            &[
+                MonitorSpec { connector: "DP-1", mode_w: 1920, mode_h: 1080 },
+                MonitorSpec { connector: "DP-2", mode_w: 1920, mode_h: 1080 },
+            ],
+            &[
+                LogicalSpec { x: 1920, y: 0, scale: 1.0, transform: 0, assign_connector: Some("DP-2") },
+                LogicalSpec { x: 0, y: 0, scale: 1.0, transform: 0, assign_connector: Some("DP-1") },
+            ],
+        );
+        assert_eq!(parse_current_state(&body).unwrap(), Some((3840, 1080)));
+    }
+
+    #[test]
+    fn test_parse_current_state_mirrored_monitors_do_not_double_extent() {
+        // Two logical monitors both anchored at (0, 0) with the same
+        // 1920x1080 mode — a mirrored layout. The extent must stay
+        // (1920, 1080), not be summed/doubled the way the old DRM
+        // width-summing heuristic would get wrong.
+        let body = build_reply_multi(
+            &[
+                MonitorSpec { connector: "DP-1", mode_w: 1920, mode_h: 1080 },
+                MonitorSpec { connector: "DP-2", mode_w: 1920, mode_h: 1080 },
+            ],
+            &[
+                LogicalSpec { x: 0, y: 0, scale: 1.0, transform: 0, assign_connector: Some("DP-1") },
+                LogicalSpec { x: 0, y: 0, scale: 1.0, transform: 0, assign_connector: Some("DP-2") },
+            ],
+        );
+        assert_eq!(parse_current_state(&body).unwrap(), Some((1920, 1080)));
     }
 
     #[test]
