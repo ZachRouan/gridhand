@@ -1,6 +1,6 @@
 [package]
 name = "gui-tool"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2024"
 rust-version = "1.88"
 description = "Zero-dependency cross-platform CLI for GUI automation — screenshots, window management, mouse/keyboard, JSON in/out. Clicks by labeled grid cell: no pixel coordinates, no accessibility tree. Built for AI agents."
@@ -18,3 +18,8 @@ name = "gui-tool"
 path = "src/main.rs"
 
 [dependencies]
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
