@@ -67,6 +67,7 @@ COMMANDS:
 OPTIONS:
     --help                          Show this help message
     --version                       Show version
+    --                              Treat all following arguments as literal text
 
 OUTPUT:
     All output is JSON to stdout. Errors are JSON to stderr.";
@@ -116,16 +117,38 @@ struct WindowTarget {
     cache_key: String,
 }
 
-/// Pre-parse args to extract --window and --window-id flags.
-/// If a window flag is present, raises the window and sleeps for focus.
-fn extract_window_flags(args: &[String]) -> Result<(Vec<String>, Option<WindowTarget>), String> {
+/// A requested --window/--window-id target, not yet resolved to a live
+/// window. Kept separate from the raise/bounds lookup so argument parsing
+/// can finish — and any parse error surface — before anything on screen
+/// changes.
+#[derive(Debug, PartialEq)]
+struct WindowSpec {
+    title: Option<String>,
+    id: Option<u64>,
+}
+
+/// Pre-parse args to extract --window and --window-id flags. Pure
+/// scan-and-validate: it never calls into the platform layer, so a bad flag
+/// anywhere in the argument list is caught before any window is raised.
+/// A bare `--` stops flag interpretation — everything after it (including
+/// literal "--window") is passed through in `remaining` untouched.
+fn scan_window_flags(args: &[String]) -> Result<(Vec<String>, Option<WindowSpec>), String> {
     let mut remaining = Vec::new();
     let mut window_title: Option<String> = None;
     let mut window_id: Option<u64> = None;
     let mut i = 0;
+    let mut literal = false;
 
     while i < args.len() {
+        if literal {
+            remaining.push(args[i].clone());
+            i += 1;
+            continue;
+        }
         match args[i].as_str() {
+            "--" => {
+                literal = true;
+            }
             "--window" => {
                 i += 1;
                 window_title = Some(
@@ -154,23 +177,31 @@ fn extract_window_flags(args: &[String]) -> Result<(Vec<String>, Option<WindowTa
         return Err("Cannot use both --window and --window-id".to_string());
     }
 
-    let resolved_id = if let Some(title) = &window_title {
+    if window_title.is_none() && window_id.is_none() {
+        return Ok((remaining, None));
+    }
+
+    Ok((remaining, Some(WindowSpec { title: window_title, id: window_id })))
+}
+
+/// Resolve a WindowSpec to a live window: find (if by title), raise, sleep
+/// for focus, and read bounds. Runs only after all argument parsing for the
+/// command has already succeeded, so a bad flag elsewhere in the command
+/// can't leave the screen mutated.
+fn resolve_and_raise(spec: &WindowSpec) -> Result<WindowTarget, String> {
+    let id = if let Some(title) = &spec.title {
         let (id, _) = platform::find_window_by_title(title)?
             .ok_or_else(|| format!("No window found matching '{}'", title))?;
-        Some(id)
+        id
     } else {
-        window_id
+        spec.id.ok_or("WindowSpec has neither title nor id")?
     };
 
-    if let Some(id) = resolved_id {
-        platform::raise_window(id)?;
-        std::thread::sleep(std::time::Duration::from_millis(200));
-        let (x, y, w, h) = platform::get_window_bounds(id)?;
-        let cache_key = cache_target_key(&window_title, window_id);
-        Ok((remaining, Some(WindowTarget { id, x, y, w, h, cache_key })))
-    } else {
-        Ok((remaining, None))
-    }
+    platform::raise_window(id)?;
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    let (x, y, w, h) = platform::get_window_bounds(id)?;
+    let cache_key = cache_target_key(&spec.title, spec.id);
+    Ok(WindowTarget { id, x, y, w, h, cache_key })
 }
 
 /// Dimensions of the image a cell reference was computed against: the cached
@@ -506,14 +537,16 @@ fn cmd_mouse(args: &[String]) -> Result<String, String> {
         return Err("Usage: gui-tool mouse click [--cell <ref>] [--window-id <id>] [--button left|right]".to_string());
     }
 
-    // Validate the subcommand before extract_window_flags raises anything
     let subcmd = args[0].as_str();
     if subcmd != "click" {
         return Err(format!("Unknown mouse subcommand: {}", subcmd));
     }
 
-    let (remaining, window_info) = extract_window_flags(&args[1..])?;
+    // Parse and validate every argument before resolving/raising the target
+    // window — a bad flag anywhere in the command must not mutate the screen.
+    let (remaining, spec) = scan_window_flags(&args[1..])?;
     let (cell, explicit_grid, button) = parse_mouse_click_args(&remaining)?;
+    let window_info = spec.map(|s| resolve_and_raise(&s)).transpose()?;
 
     if let Some(cell_ref) = &cell {
         // Cell-based click — move to cell center and click in one operation.
@@ -540,14 +573,14 @@ fn cmd_key(args: &[String]) -> Result<String, String> {
         return Err("Usage: gui-tool key <type|press> [args...]".to_string());
     }
 
-    // Validate the subcommand before extract_window_flags raises anything
     let subcmd = args[0].as_str();
     if subcmd != "type" && subcmd != "press" {
         return Err(format!("Unknown key subcommand: {}", subcmd));
     }
 
-    // Extract window flags from the remaining args
-    let (remaining, _window_info) = extract_window_flags(&args[1..])?;
+    // Parse and validate every argument before resolving/raising the target
+    // window — a bad flag anywhere in the command must not mutate the screen.
+    let (remaining, spec) = scan_window_flags(&args[1..])?;
 
     if remaining.len() > 1 {
         return Err(format!(
@@ -555,6 +588,8 @@ fn cmd_key(args: &[String]) -> Result<String, String> {
             subcmd
         ));
     }
+
+    let _window_info = spec.map(|s| resolve_and_raise(&s)).transpose()?;
 
     match subcmd {
         "type" => {
@@ -579,9 +614,9 @@ fn cmd_key(args: &[String]) -> Result<String, String> {
 mod tests {
     use super::*;
 
-    // Test that extract_window_flags can't be tested directly without a running
-    // desktop (it calls platform::raise_window), so we test the parsing logic
-    // by checking the error cases that don't require platform calls.
+    // scan_window_flags is pure parsing/validation — it never calls into the
+    // platform layer (that's resolve_and_raise's job) — so all of these run
+    // without a live desktop.
 
     #[test]
     fn test_both_window_flags_error() {
@@ -589,7 +624,7 @@ mod tests {
             "--window".to_string(), "Firefox".to_string(),
             "--window-id".to_string(), "123".to_string(),
         ];
-        let result = extract_window_flags(&args);
+        let result = scan_window_flags(&args);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Cannot use both"));
     }
@@ -597,14 +632,14 @@ mod tests {
     #[test]
     fn test_window_id_missing_value() {
         let args: Vec<String> = vec!["--window-id".to_string()];
-        let result = extract_window_flags(&args);
+        let result = scan_window_flags(&args);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_window_id_invalid_number() {
         let args: Vec<String> = vec!["--window-id".to_string(), "notanumber".to_string()];
-        let result = extract_window_flags(&args);
+        let result = scan_window_flags(&args);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Invalid window ID"));
     }
@@ -612,8 +647,53 @@ mod tests {
     #[test]
     fn test_window_missing_value() {
         let args: Vec<String> = vec!["--window".to_string()];
-        let result = extract_window_flags(&args);
+        let result = scan_window_flags(&args);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_scan_window_flags_no_window_flags_returns_none_spec() {
+        let args: Vec<String> = vec!["--cell".to_string(), "B2".to_string()];
+        let (remaining, spec) = scan_window_flags(&args).unwrap();
+        assert_eq!(remaining, args);
+        assert!(spec.is_none());
+    }
+
+    #[test]
+    fn test_scan_window_flags_extracts_window_id_spec() {
+        let args: Vec<String> = vec![
+            "--window-id".to_string(), "42".to_string(),
+            "--cell".to_string(), "B2".to_string(),
+        ];
+        let (remaining, spec) = scan_window_flags(&args).unwrap();
+        assert_eq!(remaining, vec!["--cell".to_string(), "B2".to_string()]);
+        assert_eq!(spec, Some(WindowSpec { title: None, id: Some(42) }));
+    }
+
+    #[test]
+    fn test_double_dash_terminator_passes_flags_through_literally() {
+        // "gui-tool key type -- --window" must type the literal string
+        // "--window", not interpret it as the window flag. Prove it at the
+        // arg-scan boundary: everything after a bare "--" lands in
+        // `remaining` untouched, and doesn't populate the window spec.
+        let args: Vec<String> = vec![
+            "--".to_string(), "--window".to_string(), "literal text".to_string(),
+        ];
+        let (remaining, spec) = scan_window_flags(&args).unwrap();
+        assert_eq!(remaining, vec!["--window".to_string(), "literal text".to_string()]);
+        assert!(spec.is_none());
+    }
+
+    #[test]
+    fn test_double_dash_terminator_after_real_window_flag() {
+        // Flags before "--" are still interpreted; only what follows is literal.
+        let args: Vec<String> = vec![
+            "--window-id".to_string(), "7".to_string(),
+            "--".to_string(), "--window-id".to_string(), "9".to_string(),
+        ];
+        let (remaining, spec) = scan_window_flags(&args).unwrap();
+        assert_eq!(remaining, vec!["--window-id".to_string(), "9".to_string()]);
+        assert_eq!(spec, Some(WindowSpec { title: None, id: Some(7) }));
     }
 
     #[test]
