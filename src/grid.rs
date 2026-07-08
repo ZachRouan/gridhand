@@ -19,9 +19,10 @@ pub fn auto_grid_zoom(width: u32, height: u32) -> (u32, u32) {
     (max_cols, max_rows)
 }
 
-/// Parse a grid density string like "8x6" into (cols, rows).
+/// Parse a grid density string like "8x6" or "8X6" into (cols, rows).
 pub fn parse_grid(s: &str) -> Result<(u32, u32), String> {
-    let parts: Vec<&str> = s.split('x').collect();
+    let lower = s.to_ascii_lowercase();
+    let parts: Vec<&str> = lower.split('x').collect();
     if parts.len() != 2 {
         return Err(format!("Invalid grid format '{}'. Use WxH (e.g., 4x3)", s));
     }
@@ -258,6 +259,11 @@ mod tests {
     fn test_parse_grid_custom() {
         assert_eq!(parse_grid("6x4").unwrap(), (6, 4));
         assert_eq!(parse_grid("10x8").unwrap(), (10, 8));
+    }
+
+    #[test]
+    fn test_parse_grid_uppercase() {
+        assert_eq!(parse_grid("4X3").unwrap(), (4, 3));
     }
 
     #[test]

@@ -73,7 +73,11 @@ OUTPUT:
     All output is JSON to stdout. Errors are JSON to stderr.";
 
 fn main() {
-    let args: Vec<String> = std::env::args().collect();
+    // args_os + lossy: a window title with non-UTF-8 bytes (X11 allows them)
+    // fed back as an argument must degrade, not panic with a non-JSON error.
+    let args: Vec<String> = std::env::args_os()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
 
     if args.len() < 2 {
         eprintln!("{}", json::error("Usage: gui-tool <command> [args...]. Try 'gui-tool --help'"));
@@ -302,7 +306,7 @@ fn cmd_screenshot(args: &[String]) -> Result<String, String> {
                 grid_enabled = true;
                 // Check if next arg is an explicit WxH value
                 if let Some(next) = args.get(i + 1)
-                    && !next.starts_with('-') && next.contains('x') {
+                    && !next.starts_with('-') && (next.contains('x') || next.contains('X')) {
                         grid = Some(grid::parse_grid(next)?);
                         i += 1;
                     }
@@ -788,8 +792,17 @@ mod tests {
         // fall back to auto density (which clicks a different pixel than the
         // grid the agent computed against).
         assert!(parse_mouse_click_args(&args(&["--cell", "B2", "--grid"])).is_err());
-        assert!(parse_mouse_click_args(&args(&["--cell", "B2", "--grid", "4X3"])).is_err());
+        assert!(parse_mouse_click_args(&args(&["--cell", "B2", "--grid", "4y3"])).is_err());
         assert!(parse_mouse_click_args(&args(&["--cell", "B2", "--grid", "--button"])).is_err());
+    }
+
+    #[test]
+    fn test_mouse_grid_accepts_uppercase_x() {
+        // parse_grid is case-insensitive: "4X3" clicks against the same grid
+        // as "4x3" instead of erroring on the agent's capitalization choice.
+        let (_, grid, _) =
+            parse_mouse_click_args(&args(&["--cell", "B2", "--grid", "4X3"])).unwrap();
+        assert_eq!(grid, Some((4, 3)));
     }
 
     #[test]
