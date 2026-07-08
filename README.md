@@ -36,6 +36,14 @@ Everything is hand-rolled against raw OS APIs — its own PNG encoder, D-Bus cli
 
 </div>
 
+## What it's for
+
+Concrete things it's been used for:
+
+- **Automating apps with no CLI or API** — drive GUI-only software (legacy tools, proprietary apps, installers, settings panels) the same way a person would, so an agent can script a workflow that otherwise has no headless path.
+- **Debugging GUI applications** — let an agent open the app, reproduce a bug by clicking through it, screenshot each state, and read what's actually on screen — hands and eyes for the parts a log file doesn't capture.
+- **Reaching what the accessibility tree can't** — pixel-precise grid zoom clicks targets in apps whose accessibility data is missing, incomplete, or wrong: games, `<canvas>`/WebGL, Flutter and other custom-drawn UIs, remote desktops, and video.
+
 ## Features
 
 - **Grid targeting:** Overlay a labeled grid on screenshots with red crosshairs at each cell center. Click by cell label — no pixel coordinates. Supports recursive zoom (`B2.C1`) and between-cell targeting (`D3+E3`).
