@@ -87,6 +87,7 @@ pub const MOUSEEVENTF_ABSOLUTE: u32 = 0x8000;
 
 pub const KEYEVENTF_KEYUP: u32 = 0x0002;
 pub const KEYEVENTF_UNICODE: u32 = 0x0004;
+pub const KEYEVENTF_EXTENDEDKEY: u32 = 0x0001;
 
 // --- Virtual key codes ---
 
