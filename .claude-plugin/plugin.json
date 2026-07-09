@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "gridhand",
   "description": "Zero-dependency Rust CLI for cross-platform GUI and desktop automation built for AI agents. Clicks by labeled screenshot grid, no accessibility tree.",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "author": {
     "name": "Zach Rouan"
   },
