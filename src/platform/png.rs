@@ -1533,7 +1533,7 @@ mod tests {
     #[test]
     fn test_read_png_dimensions() {
         let img = Image { width: 5, height: 7, bpp: 3, pixels: vec![0u8; 5 * 7 * 3] };
-        let path = std::env::temp_dir().join("gui-tool-test-dims.png");
+        let path = std::env::temp_dir().join("gridhand-test-dims.png");
         let path = path.to_str().unwrap().to_string();
         std::fs::write(&path, encode_png(&img).unwrap()).unwrap();
         assert_eq!(read_png_dimensions(&path).unwrap(), (5, 7));

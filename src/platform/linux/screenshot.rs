@@ -144,7 +144,7 @@ fn take_portal_screenshot(conn: &mut DbusConnection) -> Result<String, String> {
     // requests (e.g. parallel tests) would otherwise collide on the handle.
     static REQUEST_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     let seq = REQUEST_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let token = format!("gui_tool_{}_{}", std::process::id(), seq);
+    let token = format!("gridhand_{}_{}", std::process::id(), seq);
     let handle_path = format!(
         "/org/freedesktop/portal/desktop/request/{}/{}",
         sender_escaped, token

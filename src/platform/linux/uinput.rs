@@ -468,7 +468,7 @@ fn modifier_to_key(name: &str) -> Option<u16> {
 }
 
 pub fn mouse_move(x: i32, y: i32) -> Result<String, String> {
-    let mut dev = UinputDevice::create("gui-tool-mouse", DeviceKind::Mouse)?;
+    let mut dev = UinputDevice::create("gridhand-mouse", DeviceKind::Mouse)?;
     dev.write_event(EV_ABS, ABS_X, x)?;
     dev.write_event(EV_ABS, ABS_Y, y)?;
     dev.syn()?;
@@ -482,7 +482,7 @@ pub fn mouse_click(button: &str) -> Result<String, String> {
         "right" => BTN_RIGHT,
         _ => return Err(format!("Unknown button: {}. Use 'left' or 'right'", button)),
     };
-    let mut dev = UinputDevice::create("gui-tool-mouse", DeviceKind::Mouse)?;
+    let mut dev = UinputDevice::create("gridhand-mouse", DeviceKind::Mouse)?;
     dev.write_event(EV_KEY, btn, 1)?;
     dev.syn()?;
     std::thread::sleep(std::time::Duration::from_millis(50));
@@ -520,7 +520,7 @@ pub fn key_type(text: &str) -> Result<String, String> {
         ));
     }
 
-    let mut dev = UinputDevice::create("gui-tool-kbd", DeviceKind::Keyboard)?;
+    let mut dev = UinputDevice::create("gridhand-kbd", DeviceKind::Keyboard)?;
     for c in text.chars() {
         if let Some((code, shift)) = char_to_key(c) {
             if shift {
@@ -563,7 +563,7 @@ fn combo_to_keys(combo: &str) -> Result<Vec<u16>, String> {
 pub fn key_press(combo: &str) -> Result<String, String> {
     let keys = combo_to_keys(combo)?;
 
-    let mut dev = UinputDevice::create("gui-tool-kbd", DeviceKind::Keyboard)?;
+    let mut dev = UinputDevice::create("gridhand-kbd", DeviceKind::Keyboard)?;
 
     // Press all keys down in order
     for &key in &keys {

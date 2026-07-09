@@ -94,7 +94,7 @@ mod tests {
     #[ignore]
     fn test_screenshot_full() {
         let _guard = SCREENSHOT_LOCK.lock().unwrap();
-        let path = "/tmp/gui-tool-test-screenshot.png";
+        let path = "/tmp/gridhand-test-screenshot.png";
         let _ = std::fs::remove_file(path);
 
         let result = screenshot_full(path);
@@ -129,7 +129,7 @@ mod tests {
         let first_id = crate::json::extract_json_number(entries[0], "id");
         assert!(first_id.is_some(), "No id in first window");
 
-        let path = "/tmp/gui-tool-test-window-screenshot.png";
+        let path = "/tmp/gridhand-test-window-screenshot.png";
         let _ = std::fs::remove_file(path);
 
         let result = screenshot_window_by_id(first_id.unwrap() as u64, path);

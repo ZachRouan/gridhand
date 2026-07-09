@@ -15,28 +15,28 @@ const CACHE_MAX_AGE_SECS: u64 = 60;
 
 /// Returns a per-user cache path for screenshots.
 /// Uses XDG_RUNTIME_DIR (per-user, mode 0700, tmpfs) when available,
-/// falls back to ~/.cache/gui-tool/, then to the system temp dir.
+/// falls back to ~/.cache/gridhand/, then to the system temp dir.
 fn cache_path() -> String {
     if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
-        return format!("{}/gui-tool-screenshot-cache.png", dir);
+        return format!("{}/gridhand-screenshot-cache.png", dir);
     }
     if let Ok(home) = std::env::var("HOME") {
-        let dir = format!("{}/.cache/gui-tool", home);
+        let dir = format!("{}/.cache/gridhand", home);
         let _ = std::fs::create_dir_all(&dir);
         return format!("{}/screenshot-cache.png", dir);
     }
     // macOS/Windows: temp_dir is already per-user
     let tmp = std::env::temp_dir();
-    format!("{}/gui-tool-screenshot-cache.png", tmp.display())
+    format!("{}/gridhand-screenshot-cache.png", tmp.display())
 }
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 const HELP: &str = "\
-gui-tool — programmatic GUI interaction for AI agents
+gridhand — programmatic GUI interaction for AI agents
 
 USAGE:
-    gui-tool <command> [options]
+    gridhand <command> [options]
 
 COMMANDS:
     screenshot [options]            Take a screenshot
@@ -80,7 +80,7 @@ fn main() {
         .collect();
 
     if args.len() < 2 {
-        eprintln!("{}", json::error("Usage: gui-tool <command> [args...]. Try 'gui-tool --help'"));
+        eprintln!("{}", json::error("Usage: gridhand <command> [args...]. Try 'gridhand --help'"));
         std::process::exit(1);
     }
 
@@ -90,14 +90,14 @@ fn main() {
             std::process::exit(0);
         }
         "--version" | "-V" => {
-            println!("gui-tool {}", VERSION);
+            println!("gridhand {}", VERSION);
             std::process::exit(0);
         }
         "screenshot" => cmd_screenshot(&args[2..]),
         "windows" => cmd_windows(&args[2..]),
         "mouse" => cmd_mouse(&args[2..]),
         "key" => cmd_key(&args[2..]),
-        _ => Err(format!("Unknown command: {}. Try 'gui-tool --help'", args[1])),
+        _ => Err(format!("Unknown command: {}. Try 'gridhand --help'", args[1])),
     };
 
     match result {
@@ -325,7 +325,7 @@ fn cmd_screenshot(args: &[String]) -> Result<String, String> {
         return Err("Cannot use both --window and --window-id".to_string());
     }
 
-    let output = output_path.as_deref().unwrap_or("/tmp/gui-tool-screenshot.png");
+    let output = output_path.as_deref().unwrap_or("/tmp/gridhand-screenshot.png");
     validate::output_path(output)?;
 
     // When zooming with --cell, reuse the cached screenshot — but only if it
@@ -483,14 +483,14 @@ fn cmd_screenshot(args: &[String]) -> Result<String, String> {
 
 fn cmd_windows(args: &[String]) -> Result<String, String> {
     if args.is_empty() {
-        return Err("Usage: gui-tool windows <list|raise> [args...]".to_string());
+        return Err("Usage: gridhand windows <list|raise> [args...]".to_string());
     }
 
     match args[0].as_str() {
         "list" => platform::list_windows(),
         "raise" => {
             let id: u64 = args.get(1)
-                .ok_or("Usage: gui-tool windows raise <id>")?
+                .ok_or("Usage: gridhand windows raise <id>")?
                 .parse()
                 .map_err(|_| "Invalid window ID")?;
             let result = platform::raise_window(id);
@@ -529,7 +529,7 @@ fn parse_mouse_click_args(args: &[String]) -> Result<MouseClickArgs, String> {
                 i += 1;
                 button = args.get(i).ok_or("--button requires a value (left|right)")?.clone();
             }
-            other => return Err(format!("Unknown argument: {}. Try 'gui-tool --help'", other)),
+            other => return Err(format!("Unknown argument: {}. Try 'gridhand --help'", other)),
         }
         i += 1;
     }
@@ -538,7 +538,7 @@ fn parse_mouse_click_args(args: &[String]) -> Result<MouseClickArgs, String> {
 
 fn cmd_mouse(args: &[String]) -> Result<String, String> {
     if args.is_empty() {
-        return Err("Usage: gui-tool mouse click [--cell <ref>] [--window-id <id>] [--button left|right]".to_string());
+        return Err("Usage: gridhand mouse click [--cell <ref>] [--window-id <id>] [--button left|right]".to_string());
     }
 
     let subcmd = args[0].as_str();
@@ -574,7 +574,7 @@ fn cmd_mouse(args: &[String]) -> Result<String, String> {
 
 fn cmd_key(args: &[String]) -> Result<String, String> {
     if args.is_empty() {
-        return Err("Usage: gui-tool key <type|press> [args...]".to_string());
+        return Err("Usage: gridhand key <type|press> [args...]".to_string());
     }
 
     let subcmd = args[0].as_str();
@@ -598,14 +598,14 @@ fn cmd_key(args: &[String]) -> Result<String, String> {
     match subcmd {
         "type" => {
             let text = remaining.first()
-                .ok_or("Usage: gui-tool key type <text>")?;
+                .ok_or("Usage: gridhand key type <text>")?;
             let result = platform::key_type(text);
             invalidate_cache();
             result
         }
         "press" => {
             let combo = remaining.first()
-                .ok_or("Usage: gui-tool key press <combo>")?;
+                .ok_or("Usage: gridhand key press <combo>")?;
             let result = platform::key_press(combo);
             invalidate_cache();
             result
@@ -676,7 +676,7 @@ mod tests {
 
     #[test]
     fn test_double_dash_terminator_passes_flags_through_literally() {
-        // "gui-tool key type -- --window" must type the literal string
+        // "gridhand key type -- --window" must type the literal string
         // "--window", not interpret it as the window flag. Prove it at the
         // arg-scan boundary: everything after a bare "--" lands in
         // `remaining` untouched, and doesn't populate the window spec.
@@ -734,7 +734,7 @@ mod tests {
 
     #[test]
     fn test_cache_fresh_requires_matching_target() {
-        let dir = std::env::temp_dir().join("gui-tool-test-cache");
+        let dir = std::env::temp_dir().join("gridhand-test-cache");
         let _ = std::fs::create_dir_all(&dir);
         let png = dir.join("cache.png");
         let meta = dir.join("cache.png.target");

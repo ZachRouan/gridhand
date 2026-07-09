@@ -1,6 +1,6 @@
 #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
 compile_error!(
-    "gui-tool's Linux backend issues raw syscalls via inline assembly and \
+    "gridhand's Linux backend issues raw syscalls via inline assembly and \
      supports only x86_64 and aarch64"
 );
 
