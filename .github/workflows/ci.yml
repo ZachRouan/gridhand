@@ -54,6 +54,6 @@ jobs:
         run: |
           count="$(grep -c '^name = ' Cargo.lock)"
           if [ "$count" != "1" ]; then
-            echo "Cargo.lock lists $count packages; the zero-dependency constraint requires exactly 1 (gui-tool itself)."
+            echo "Cargo.lock lists $count packages; the zero-dependency constraint requires exactly 1 (gridhand itself)."
             exit 1
           fi

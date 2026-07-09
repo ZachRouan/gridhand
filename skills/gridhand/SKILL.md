@@ -1,27 +1,27 @@
 ---
-name: gui-tool
+name: gridhand
 description: Interact with the desktop GUI — take screenshots, list/raise windows, click with grid targeting, type text, press key combos. Use when you need to see the screen, find windows, click on things, type into applications, or automate any GUI interaction. All commands return JSON.
 ---
 
-# gui-tool
+# gridhand
 
 Desktop GUI automation CLI. All commands return JSON to stdout (errors to stderr).
 
 ```bash
-gui-tool screenshot --output /tmp/screen.png                              # full screen
-gui-tool screenshot --window-id 123 --output /tmp/app.png                 # cropped to window
-gui-tool screenshot --window-id 123 --grid --output /tmp/grid.png         # grid overlay
-gui-tool screenshot --window-id 123 --grid --cell B2 --output /tmp/z.png  # zoom into cell
+gridhand screenshot --output /tmp/screen.png                              # full screen
+gridhand screenshot --window-id 123 --output /tmp/app.png                 # cropped to window
+gridhand screenshot --window-id 123 --grid --output /tmp/grid.png         # grid overlay
+gridhand screenshot --window-id 123 --grid --cell B2 --output /tmp/z.png  # zoom into cell
 
-gui-tool windows list                                # JSON list of all windows
-gui-tool windows raise 123                           # bring window to front
+gridhand windows list                                # JSON list of all windows
+gridhand windows raise 123                           # bring window to front
 
-gui-tool mouse click                                 # click at current position
-gui-tool mouse click --button right                  # right-click
-gui-tool mouse click --cell B2.C1 --window-id 123   # click cell (recursive zoom OK)
+gridhand mouse click                                 # click at current position
+gridhand mouse click --button right                  # right-click
+gridhand mouse click --cell B2.C1 --window-id 123   # click cell (recursive zoom OK)
 
-gui-tool key type "hello" --window-id 123            # type text
-gui-tool key press "ctrl+a" --window-id 123          # key combo (ctrl/shift/alt/super + key)
+gridhand key type "hello" --window-id 123            # type text
+gridhand key press "ctrl+a" --window-id 123          # key combo (ctrl/shift/alt/super + key)
 ```
 
 ---
@@ -36,7 +36,7 @@ No pixel coordinates exist. The grid is the only way to click. Each cell has a r
 
 **Zoom.** Crop into that cell to get a sub-grid. Pick the sub-cell matching your position note — don't re-read text or hunt for icons in zoomed views, they'll be blurry. Translate spatially: "bottom-left of D1" → sub-cell B5 or C5. Keep zooming (append with dots: `D1.C5.F3`) until a crosshair is on the target. 2–3 levels is typical.
 
-**Click.** `gui-tool mouse click --cell D1.C5 --window-id 123`
+**Click.** `gridhand mouse click --cell D1.C5 --window-id 123`
 
 **Verify.** Zoom into the area you just clicked to check the result — a full-page screenshot is too small to see subtle state changes (button color, focus ring, selection highlight). If the click missed, re-orient from scratch — the screen state may have changed.
 
@@ -48,7 +48,7 @@ Zoomed views show **dimmed context from adjacent parent cells with their labels 
 # Zoomed into G1, but target is actually in H1 (visible in dimmed context)
 # WRONG: take a fresh full-grid screenshot and start over
 # RIGHT: just use H1 directly
-gui-tool screenshot --window-id 123 --grid --cell H1 --output /tmp/zoom.png
+gridhand screenshot --window-id 123 --grid --cell H1 --output /tmp/zoom.png
 ```
 
 Only take a fresh full-grid screenshot (no `--cell`) when the screen has changed (after clicking, typing, or switching windows) or when you're genuinely lost.
@@ -58,9 +58,9 @@ Only take a fresh full-grid screenshot (no `--cell`) when the screen has changed
 Target straddles two cells? Use `+` to center on the boundary:
 
 ```bash
-gui-tool mouse click --cell D3+E3 --window-id 123   # horizontal
-gui-tool mouse click --cell D3+D4 --window-id 123   # vertical
-gui-tool mouse click --cell D3+E4 --window-id 123   # diagonal
+gridhand mouse click --cell D3+E3 --window-id 123   # horizontal
+gridhand mouse click --cell D3+D4 --window-id 123   # vertical
+gridhand mouse click --cell D3+E4 --window-id 123   # diagonal
 ```
 
 ### Small Icons and Buttons
@@ -73,5 +73,5 @@ Tiny targets (like/dislike buttons, close icons, checkboxes) need 3+ zoom levels
 
 ## Known Failure Modes
 
-- **Non-ASCII text on Linux:** `gui-tool key type` errors on non-ASCII characters on Linux (the uinput backend only synthesizes ASCII keycodes). Stick to ASCII text, or split out non-ASCII characters and handle them another way (e.g. clipboard paste via a key combo, if the target app supports it).
+- **Non-ASCII text on Linux:** `gridhand key type` errors on non-ASCII characters on Linux (the uinput backend only synthesizes ASCII keycodes). Stick to ASCII text, or split out non-ASCII characters and handle them another way (e.g. clipboard paste via a key combo, if the target app supports it).
 - **Zoom chains bottoming out:** Recursive zoom (`B2.C1.F3...`) fails with a "cell size reaches zero" error around 3 levels deep, once the cropped region gets too small to subdivide further. If you hit this, back off one level and either retry with fewer zoom levels, or take a fresh screenshot with an explicit coarser `--grid` (e.g. `--grid 4x4`) so each cell covers more pixels.

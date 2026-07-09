@@ -1,13 +1,13 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
-  "name": "gui-tool",
+  "name": "gridhand",
   "description": "Zero-dependency Rust CLI for cross-platform GUI and desktop automation built for AI agents. Clicks by labeled screenshot grid, no accessibility tree.",
   "version": "0.3.2",
   "author": {
     "name": "Zach Rouan"
   },
-  "repository": "https://github.com/ZachRouan/agent-desktop-interface",
-  "homepage": "https://github.com/ZachRouan/agent-desktop-interface",
+  "repository": "https://github.com/ZachRouan/gridhand",
+  "homepage": "https://github.com/ZachRouan/gridhand",
   "license": "MIT",
-  "keywords": ["gui-automation", "desktop-automation", "computer-use", "rust", "cli"]
+  "keywords": ["gui-automation", "desktop-automation", "computer-use", "rust", "cli", "gridhand"]
 }

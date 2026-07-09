@@ -2,7 +2,7 @@
 set -e
 
 # --skip-build: do the platform setup only (for users who installed the binary
-# via `cargo install gui-tool` or a prebuilt release and don't need to compile).
+# via `cargo install gridhand` or a prebuilt release and don't need to compile).
 SKIP_BUILD=0
 for arg in "$@"; do
     case "$arg" in
@@ -11,7 +11,7 @@ for arg in "$@"; do
 done
 
 OS="$(uname -s)"
-echo "=== gui-tool setup ($OS) ==="
+echo "=== gridhand setup ($OS) ==="
 
 # --- Linux-specific setup ---
 if [ "$OS" = "Linux" ]; then
@@ -103,16 +103,16 @@ fi
 # --- Build (all platforms) ---
 if [ "$SKIP_BUILD" -eq 1 ]; then
     echo ""
-    echo "Skipping build (--skip-build): using an already-installed gui-tool binary."
+    echo "Skipping build (--skip-build): using an already-installed gridhand binary."
 else
     echo ""
-    echo "Building gui-tool..."
+    echo "Building gridhand..."
     cargo build --release
-    echo "Binary at: $(pwd)/target/release/gui-tool"
+    echo "Binary at: $(pwd)/target/release/gridhand"
 fi
 
 echo ""
 echo "=== Setup complete ==="
 if [ "$OS" = "Linux" ]; then
-    echo "If you were added to the 'input' group, log out and back in before using gui-tool."
+    echo "If you were added to the 'input' group, log out and back in before using gridhand."
 fi
