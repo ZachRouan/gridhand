@@ -176,10 +176,10 @@ fn parse_mode(s: &str) -> Option<(i32, i32)> {
 /// virtual_size, then to 1920x1080.
 ///
 /// Cached in a `OnceLock`: every mouse `UinputDevice::create` call re-detects
-/// the screen size, and a single `mouse click` flow creates two devices
-/// (move, then click) — each an uncached D-Bus connect + Mutter
-/// GetCurrentState round trip. Caching bounds a wedged/slow shell to at most
-/// one method-timeout stall per process instead of one per device.
+/// the screen size, and each detection is an uncached D-Bus connect plus a
+/// Mutter GetCurrentState round trip. A `mouse click --cell` now uses one
+/// device, but caching still bounds a wedged/slow shell to at most one
+/// method-timeout stall per process, however many devices get created.
 fn detect_screen_size() -> (i32, i32) {
     static SCREEN_SIZE: std::sync::OnceLock<(i32, i32)> = std::sync::OnceLock::new();
     *SCREEN_SIZE.get_or_init(detect_screen_size_uncached)
