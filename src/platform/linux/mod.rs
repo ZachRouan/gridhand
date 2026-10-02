@@ -39,12 +39,17 @@ pub fn raise_window(id: u64) -> Result<String, String> {
     desktop::raise_window(id)
 }
 
+#[cfg(test)]
 pub fn mouse_move(x: i32, y: i32) -> Result<String, String> {
     uinput::mouse_move(x, y)
 }
 
 pub fn mouse_click(button: &str) -> Result<String, String> {
     uinput::mouse_click(button)
+}
+
+pub fn mouse_click_at(x: i32, y: i32, button: &str) -> Result<String, String> {
+    uinput::mouse_click_at(x, y, button)
 }
 
 pub fn key_type(text: &str) -> Result<String, String> {

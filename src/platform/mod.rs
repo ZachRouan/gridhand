@@ -15,6 +15,13 @@ pub use windows_os::*;
 
 pub(crate) mod png;
 
+#[cfg(not(target_os = "linux"))]
+pub fn mouse_click_at(x: i32, y: i32, button: &str) -> Result<String, String> {
+    mouse_move(x, y)?;
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    mouse_click(button)
+}
+
 /// Integration tests for the platform-agnostic public API.
 ///
 /// These tests exercise real OS functionality (mouse input, window management,

@@ -563,8 +563,9 @@ fn cmd_mouse(args: &[String]) -> Result<String, String> {
         let (x, y) = grid::cell_to_screen_coords(
             cell_ref, img_w, img_h, target.x, target.y, target.w, target.h, explicit_grid,
         )?;
-        platform::mouse_move(x, y)?;
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        let result = platform::mouse_click_at(x, y, &button);
+        invalidate_cache();
+        return result;
     }
 
     let result = platform::mouse_click(&button);
