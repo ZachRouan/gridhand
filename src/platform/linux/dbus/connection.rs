@@ -165,6 +165,51 @@ impl DbusConnection {
         }
     }
 
+    pub fn wait_for_method_call(
+        &mut self,
+        expected_path: &str,
+        expected_interface: &str,
+        expected_member: &str,
+        timeout_ms: u64,
+    ) -> Result<Reply, String> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
+        loop {
+            let reply = match self.read_next_message_before(deadline) {
+                Ok(r) => r,
+                Err(e) if e.contains("timed out") => {
+                    return Err("Timeout waiting for method call".to_string());
+                }
+                Err(e) => return Err(e),
+            };
+
+            if reply.header.msg_type == message::METHOD_CALL {
+                let path_match = reply.header.path.as_deref() == Some(expected_path);
+                let iface_match = reply.header.interface.as_deref() == Some(expected_interface);
+                let member_match = reply.header.member.as_deref() == Some(expected_member);
+                if path_match && iface_match && member_match {
+                    return Ok(reply);
+                }
+            }
+        }
+    }
+
+    pub fn send_empty_method_return(&mut self, call: &Reply) -> Result<(), String> {
+        let destination = call
+            .header
+            .sender
+            .as_deref()
+            .ok_or("D-Bus method call missing sender")?
+            .to_string();
+
+        self.serial += 1;
+        let msg =
+            message::build_method_return(self.serial, call.header.serial, &destination, None, &[]);
+
+        self.stream
+            .write_all(&msg)
+            .map_err(|e| format!("Failed to send D-Bus method return: {}", e))
+    }
+
     fn read_reply(&mut self, expected_serial: u32, deadline: std::time::Instant, timeout_ms: u64) -> Result<Reply, String> {
         loop {
             let reply = match self.read_next_message_before(deadline) {

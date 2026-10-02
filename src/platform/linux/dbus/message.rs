@@ -72,6 +72,43 @@ pub fn build_method_call_no_reply(
     build_method_call(serial, destination, path, interface, member, signature, body, NO_REPLY_EXPECTED)
 }
 
+pub fn build_method_return(
+    serial: u32,
+    reply_serial: u32,
+    destination: &str,
+    signature: Option<&str>,
+    body: &[u8],
+) -> Vec<u8> {
+    let mut fields = MarshalBuffer::new();
+
+    write_header_field(&mut fields, FIELD_REPLY_SERIAL, "u", |buf| {
+        buf.write_u32(reply_serial)
+    });
+    write_header_field(&mut fields, FIELD_DESTINATION, "s", |buf| {
+        buf.write_string(destination)
+    });
+
+    if let Some(sig) = signature {
+        write_header_field(&mut fields, FIELD_SIGNATURE, "g", |buf| {
+            buf.write_signature(sig)
+        });
+    }
+
+    let fields_bytes = fields.into_bytes();
+
+    let mut msg = vec![b'l', METHOD_RETURN, 0, PROTOCOL_VERSION];
+    msg.extend_from_slice(&(body.len() as u32).to_le_bytes());
+    msg.extend_from_slice(&serial.to_le_bytes());
+    msg.extend_from_slice(&(fields_bytes.len() as u32).to_le_bytes());
+    msg.extend_from_slice(&fields_bytes);
+    while !msg.len().is_multiple_of(8) {
+        msg.push(0);
+    }
+    msg.extend_from_slice(body);
+
+    msg
+}
+
 fn write_header_field(buf: &mut MarshalBuffer, code: u8, sig: &str, write_val: impl FnOnce(&mut MarshalBuffer)) {
     buf.align_struct();
     buf.write_byte(code);
@@ -337,6 +374,15 @@ mod tests {
         let data = make_header(METHOD_RETURN, &fields);
         let (header, _) = parse_header(&data).unwrap();
         assert_eq!(header.reply_serial, Some(7));
+    }
+
+    #[test]
+    fn test_build_method_return_sets_reply_serial() {
+        let msg = build_method_return(9, 42, ":1.5", None, &[]);
+        let (header, _) = parse_header(&msg).unwrap();
+        assert_eq!(header.msg_type, METHOD_RETURN);
+        assert_eq!(header.serial, 9);
+        assert_eq!(header.reply_serial, Some(42));
     }
 
     #[test]

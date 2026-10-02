@@ -28,7 +28,7 @@ Built for AI desktop agents (Claude Code, Codex, Gemini CLI, and friends), but i
 
 **It sees pixels, not an accessibility tree.** Most desktop-automation tools for agents find elements by reading the OS accessibility tree — which only helps when that tree *exists*, is *complete*, and is *correct*. `gridhand` never touches it. It works from the actual rendered screen, so it drives what tree-based tools can't see: games, `<canvas>` / WebGL apps, Flutter and other custom-drawn UIs, remote desktops and VNC, video, and any app with missing, mislabeled, or wrong accessibility data. **If a human can see it, `gridhand` can click it.**
 
-Everything is hand-rolled against raw OS APIs — its own PNG encoder, D-Bus client, JSON output, and DEFLATE — so there are no crates to audit, no build surprises, and it runs natively on **GNOME/Wayland** where `xdotool` and `pyautogui` give up.
+Everything is hand-rolled against raw OS APIs — its own PNG encoder, D-Bus client, JSON output, and DEFLATE — so there are no crates to audit, no build surprises, and it runs natively on **GNOME/Wayland and KDE Plasma/Wayland** where `xdotool` and `pyautogui` give up.
 
 <div align="center">
 
@@ -52,7 +52,7 @@ Concrete things it's been used for:
 - **No accessibility tree required:** Targets purely from what's on screen — never AT-SPI, UI Automation, or the AX APIs. Works where the accessibility tree is missing, incomplete, or wrong: games, `<canvas>`/WebGL, custom-drawn UIs (Flutter, etc.), and remote desktops.
 - **Contextual zoom:** Zoomed views show the target cell with a coarser sub-grid, surrounded by dimmed context from adjacent cells with parent-level labels for spatial orientation.
 - **No dependencies:** Pure std Rust, direct FFI to OS APIs (CoreGraphics, user32.dll, D-Bus). Compiles to a single small binary.
-- **Wayland support:** Works natively on GNOME/Wayland via XDG Desktop Portals and the `window-calls` extension, where tools like `xdotool` and `pyautogui` break.
+- **Wayland support:** Works natively on GNOME/Wayland via XDG Desktop Portals + `window-calls`, and on KDE Plasma/Wayland via XDG Desktop Portals + KWin scripting.
 - **JSON output:** Every command returns structured JSON, so agents don't have to parse text output.
 
 ## Grid Targeting
@@ -162,7 +162,7 @@ cp skills/gridhand/SKILL.md ~/.codex/skills/gridhand/SKILL.md
 
 ## Install
 
-Pick the easiest that fits. On **Linux and macOS** there's a one-time platform-setup step after you get the binary (input permissions and the GNOME `window-calls` extension on Linux; Accessibility + Screen Recording permissions on macOS) — see [Platform Requirements](#platform-requirements). Windows needs nothing.
+Pick the easiest that fits. On **Linux and macOS** there's a one-time platform-setup step after you get the binary (input permissions, plus the GNOME `window-calls` extension when running GNOME; Accessibility + Screen Recording permissions on macOS) — see [Platform Requirements](#platform-requirements). KDE Plasma uses KWin scripting and needs no Gridhand-specific extension. Windows needs nothing.
 
 **Prebuilt binary** (no Rust toolchain) — grab your platform's archive from the [latest release](https://github.com/ZachRouan/gridhand/releases/latest), then:
 
@@ -195,7 +195,7 @@ After a **prebuilt or `cargo install`** on Linux/macOS, run the platform setup w
 
 |Platform   |Version      |Setup                                                                                                                 |
 |-----------|-------------|----------------------------------------------------------------------------------------------------------------------|
-|**Linux**  |GNOME/Wayland|`input` group + udev rule + [window-calls](https://github.com/ickyicky/window-calls) extension (handled by `setup.sh`)|
+|**Linux**  |GNOME/Wayland, KDE Plasma 6/Wayland|`input` group + udev rule. GNOME also needs [window-calls](https://github.com/ickyicky/window-calls); KDE uses built-in KWin scripting (handled by `setup.sh`).|
 |**macOS**  |10.15+       |Grant **Accessibility** + **Screen Recording** permissions in System Settings                                         |
 |**Windows**|8+           |None (`cargo build --release` in MSYS2, Git Bash, or PowerShell)                                                      |
 
@@ -205,7 +205,7 @@ After a **prebuilt or `cargo install`** on Linux/macOS, run the platform setup w
 
 ~9,100 lines of Rust, no external crates. Each platform uses direct OS APIs:
 
-- **Linux:** `/dev/uinput` for input via ioctl syscalls. Full D-Bus wire protocol implementation (SASL auth, message framing, type marshalling) for XDG Desktop Portal screenshots and GNOME `window-calls` window management.
+- **Linux:** `/dev/uinput` for input via ioctl syscalls. Full D-Bus wire protocol implementation (SASL auth, message framing, type marshalling) for XDG Desktop Portal screenshots, GNOME `window-calls`, and KDE KWin scripting window management.
 - **macOS:** CoreGraphics FFI (`CGEventCreateMouseEvent`, `CGEventCreateKeyboardEvent`) for input. `CGWindowListCreateImage` for screenshots. Objective-C runtime bindings for window activation.
 - **Windows:** `user32.dll` (`SendInput`, `EnumWindows`, `SetForegroundWindow`, `VkKeyScanW`) and `gdi32.dll` (`BitBlt`, `GetDIBits`) for input, window management, and screenshots.
 
@@ -213,7 +213,7 @@ After a **prebuilt or `cargo install`** on Linux/macOS, run the platform setup w
 
 - **macOS window raise** activates the owning application, not necessarily the specific window — if an app has multiple windows, the one that ends up frontmost may not be the one you targeted.
 - **macOS screenshots** use `CGWindowListCreateImage`, a CoreGraphics API deprecated in macOS 14. It still works today; a ScreenCaptureKit-based backend is future work.
-- **Linux desktop-size detection** prefers GNOME Mutter's `DisplayConfig` D-Bus interface and falls back to a DRM-sysfs heuristic on non-GNOME/non-Mutter sessions.
+- **Linux desktop-size detection** uses the compositor's logical layout on GNOME (Mutter `DisplayConfig`) and KDE Plasma (KWin scripting), then falls back to a DRM-sysfs heuristic on unsupported desktops.
 
 ## License
 

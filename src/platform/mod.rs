@@ -133,13 +133,16 @@ mod tests {
         let windows_val = windows_str.unwrap();
         let entries = crate::json::split_json_array(&windows_val);
         assert!(!entries.is_empty(), "No windows found");
-        let first_id = crate::json::extract_json_number(entries[0], "id");
+        let first_id = crate::json::extract_json_string(entries[0], "id").or_else(|| {
+            crate::json::extract_json_number(entries[0], "id").map(|id| id.to_string())
+        });
         assert!(first_id.is_some(), "No id in first window");
 
         let path = "/tmp/gridhand-test-window-screenshot.png";
         let _ = std::fs::remove_file(path);
 
-        let result = screenshot_window_by_id(first_id.unwrap() as u64, path);
+        let first_id = first_id.unwrap();
+        let result = screenshot_window_by_id(&first_id, path);
         assert!(result.is_ok(), "screenshot_window_by_id failed: {:?}", result.err());
         assert!(std::path::Path::new(path).exists(), "Screenshot file not created");
 
