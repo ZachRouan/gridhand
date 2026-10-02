@@ -467,6 +467,7 @@ fn modifier_to_key(name: &str) -> Option<u16> {
     }
 }
 
+#[cfg(test)]
 pub fn mouse_move(x: i32, y: i32) -> Result<String, String> {
     let mut dev = UinputDevice::create("gridhand-mouse", DeviceKind::Mouse)?;
     dev.write_event(EV_ABS, ABS_X, x)?;
@@ -476,19 +477,44 @@ pub fn mouse_move(x: i32, y: i32) -> Result<String, String> {
     Ok(crate::json::success())
 }
 
-pub fn mouse_click(button: &str) -> Result<String, String> {
-    let btn = match button {
-        "left" => BTN_LEFT,
-        "right" => BTN_RIGHT,
-        _ => return Err(format!("Unknown button: {}. Use 'left' or 'right'", button)),
-    };
-    let mut dev = UinputDevice::create("gridhand-mouse", DeviceKind::Mouse)?;
+fn mouse_button_code(button: &str) -> Result<u16, String> {
+    match button {
+        "left" => Ok(BTN_LEFT),
+        "right" => Ok(BTN_RIGHT),
+        _ => Err(format!("Unknown button: {}. Use 'left' or 'right'", button)),
+    }
+}
+
+fn click_button(dev: &mut UinputDevice, btn: u16) -> Result<(), String> {
     dev.write_event(EV_KEY, btn, 1)?;
     dev.syn()?;
     std::thread::sleep(std::time::Duration::from_millis(50));
     dev.write_event(EV_KEY, btn, 0)?;
     dev.syn()?;
     std::thread::sleep(std::time::Duration::from_millis(50));
+    Ok(())
+}
+
+pub fn mouse_click(button: &str) -> Result<String, String> {
+    let btn = mouse_button_code(button)?;
+    let mut dev = UinputDevice::create("gridhand-mouse", DeviceKind::Mouse)?;
+    click_button(&mut dev, btn)?;
+    Ok(crate::json::success())
+}
+
+pub fn mouse_click_at(x: i32, y: i32, button: &str) -> Result<String, String> {
+    let btn = mouse_button_code(button)?;
+    let mut dev = UinputDevice::create("gridhand-mouse", DeviceKind::Mouse)?;
+
+    dev.write_event(EV_ABS, ABS_X, x)?;
+    dev.write_event(EV_ABS, ABS_Y, y)?;
+    dev.syn()?;
+
+    // Give the compositor time to apply the absolute move before delivering
+    // the click, without destroying and recreating the device.
+    std::thread::sleep(std::time::Duration::from_millis(50));
+
+    click_button(&mut dev, btn)?;
     Ok(crate::json::success())
 }
 
@@ -584,6 +610,13 @@ pub fn key_press(combo: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_mouse_button_code() {
+        assert_eq!(mouse_button_code("left"), Ok(BTN_LEFT));
+        assert_eq!(mouse_button_code("right"), Ok(BTN_RIGHT));
+        assert!(mouse_button_code("middle").is_err());
+    }
 
     #[test]
     fn test_combo_to_keys_rejects_trailing_plus() {
