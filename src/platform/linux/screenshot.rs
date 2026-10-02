@@ -1,7 +1,7 @@
 use crate::json::{self, JsonValue};
 use super::dbus::DbusConnection;
 use super::dbus::types::MarshalBuffer;
-use super::windows;
+use super::desktop;
 
 const PORTAL_DEST: &str = "org.freedesktop.portal.Desktop";
 const PORTAL_PATH: &str = "/org/freedesktop/portal/desktop";
@@ -35,25 +35,15 @@ fn visible_crop(x: i64, y: i64, w: i64, h: i64) -> (u32, u32, u32, u32) {
 pub fn screenshot_window(title: &str, output: &str) -> Result<String, String> {
     let mut conn = DbusConnection::connect()?;
 
-    let (win_id, win_json) = windows::find_window_by_title(&mut conn, title)?
+    let (win_id, win_json) = desktop::find_window_by_title_with_conn(&mut conn, title)?
         .ok_or_else(|| format!("No window found matching '{}'", title))?;
 
-    // Activate the window
-    let mut body = MarshalBuffer::new();
-    body.write_u32(win_id);
-    conn.call_method(
-        "org.gnome.Shell",
-        "/org/gnome/Shell/Extensions/Windows",
-        "org.gnome.Shell.Extensions.Windows",
-        "Activate",
-        Some("u"),
-        &body.into_bytes(),
-    )?;
+    desktop::raise_window_with_conn(&mut conn, win_id)?;
 
     std::thread::sleep(std::time::Duration::from_millis(300));
 
     // Get window details (x, y, width, height) for cropping
-    let details_json = windows::get_window_details(&mut conn, win_id)?;
+    let details_json = desktop::window_details_with_conn(&mut conn, win_id)?;
     let win_x = crate::json::extract_json_number(&details_json, "x")
         .ok_or_else(|| "Window details missing 'x' field".to_string())?;
     let win_y = crate::json::extract_json_number(&details_json, "y")
@@ -86,25 +76,16 @@ pub fn screenshot_window(title: &str, output: &str) -> Result<String, String> {
     ]))
 }
 
-pub fn screenshot_window_by_id(id: u32, output: &str) -> Result<String, String> {
+pub fn screenshot_window_by_id(id: u64, output: &str) -> Result<String, String> {
     let mut conn = DbusConnection::connect()?;
 
     // Raise the window first
-    let mut body = MarshalBuffer::new();
-    body.write_u32(id);
-    conn.call_method(
-        "org.gnome.Shell",
-        "/org/gnome/Shell/Extensions/Windows",
-        "org.gnome.Shell.Extensions.Windows",
-        "Activate",
-        Some("u"),
-        &body.into_bytes(),
-    )?;
+    desktop::raise_window_with_conn(&mut conn, id)?;
 
     std::thread::sleep(std::time::Duration::from_millis(300));
 
     // Get window details (x, y, width, height) for cropping
-    let details_json = windows::get_window_details(&mut conn, id)?;
+    let details_json = desktop::window_details_with_conn(&mut conn, id)?;
     let win_x = crate::json::extract_json_number(&details_json, "x")
         .ok_or_else(|| "Window details missing 'x' field".to_string())?;
     let win_y = crate::json::extract_json_number(&details_json, "y")

@@ -26,7 +26,10 @@ pub fn list_windows() -> Result<String, String> {
 
 pub fn raise_window(id: u32) -> Result<String, String> {
     let mut conn = DbusConnection::connect()?;
+    raise_window_with_conn(&mut conn, id)
+}
 
+pub fn raise_window_with_conn(conn: &mut DbusConnection, id: u32) -> Result<String, String> {
     let mut body = MarshalBuffer::new();
     body.write_u32(id);
 

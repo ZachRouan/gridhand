@@ -186,7 +186,7 @@ fn detect_screen_size() -> (i32, i32) {
 }
 
 fn detect_screen_size_uncached() -> (i32, i32) {
-    if let Some((w, h)) = super::display::logical_desktop_size()
+    if let Some((w, h)) = super::desktop::logical_desktop_size()
         && w > 0 && h > 0 {
             return (w, h);
         }
