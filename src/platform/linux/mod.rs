@@ -8,6 +8,7 @@ mod uinput;
 mod dbus;
 mod desktop;
 mod display;
+mod kwin;
 mod screenshot;
 mod windows;
 
@@ -19,15 +20,15 @@ pub fn screenshot_window(title: &str, output: &str) -> Result<String, String> {
     screenshot::screenshot_window(title, output)
 }
 
-pub fn screenshot_window_by_id(id: u64, output: &str) -> Result<String, String> {
+pub fn screenshot_window_by_id(id: &str, output: &str) -> Result<String, String> {
     screenshot::screenshot_window_by_id(id, output)
 }
 
-pub fn find_window_by_title(title: &str) -> Result<Option<(u64, String)>, String> {
+pub fn find_window_by_title(title: &str) -> Result<Option<(String, String)>, String> {
     desktop::find_window_by_title(title)
 }
 
-pub fn get_window_bounds(id: u64) -> Result<(i32, i32, u32, u32), String> {
+pub fn get_window_bounds(id: &str) -> Result<(i32, i32, u32, u32), String> {
     desktop::window_bounds(id)
 }
 
@@ -35,7 +36,7 @@ pub fn list_windows() -> Result<String, String> {
     desktop::list_windows()
 }
 
-pub fn raise_window(id: u64) -> Result<String, String> {
+pub fn raise_window(id: &str) -> Result<String, String> {
     desktop::raise_window(id)
 }
 

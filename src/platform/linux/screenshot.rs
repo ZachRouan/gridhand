@@ -32,18 +32,78 @@ fn visible_crop(x: i64, y: i64, w: i64, h: i64) -> (u32, u32, u32, u32) {
     (x.max(0) as u32, y.max(0) as u32, crop_w, crop_h)
 }
 
+/// Map a rectangle in KWin global logical coordinates into the pixel space of
+/// the KDE portal's full-workspace PNG.
+///
+/// xdg-desktop-portal-kde captures KWin's virtual screen geometry at native
+/// resolution. KWin renders that entire logical rectangle at one scale, so the
+/// actual PNG dimensions are authoritative: subtract the virtual origin and
+/// scale both edges into the image. Computing edges independently preserves
+/// rounding and handles windows partially outside the captured workspace.
+fn logical_crop_to_pixels(
+    x: i64,
+    y: i64,
+    w: i64,
+    h: i64,
+    virtual_geometry: (i64, i64, i64, i64),
+    image_size: (u32, u32),
+) -> Result<(u32, u32, u32, u32), String> {
+    let (vx, vy, vw, vh) = virtual_geometry;
+    let (image_w, image_h) = image_size;
+
+    if w <= 0 || h <= 0 {
+        return Err(format!("Window has invalid geometry {}x{}", w, h));
+    }
+    if vw <= 0 || vh <= 0 || image_w == 0 || image_h == 0 {
+        return Err("Cannot map screenshot coordinates with empty geometry".to_string());
+    }
+
+    let map_x = |value: i64| (((value - vx) as f64) * image_w as f64 / vw as f64).round() as i64;
+    let map_y = |value: i64| (((value - vy) as f64) * image_h as f64 / vh as f64).round() as i64;
+
+    let left = map_x(x).clamp(0, image_w as i64);
+    let top = map_y(y).clamp(0, image_h as i64);
+    let right = map_x(x + w).clamp(0, image_w as i64);
+    let bottom = map_y(y + h).clamp(0, image_h as i64);
+
+    if right <= left || bottom <= top {
+        return Err("Window does not intersect the captured workspace".to_string());
+    }
+
+    Ok((
+        left as u32,
+        top as u32,
+        (right - left) as u32,
+        (bottom - top) as u32,
+    ))
+}
+
+fn window_crop(
+    logical_geometry: Option<(i64, i64, i64, i64)>,
+    image_size: (u32, u32),
+    x: i64,
+    y: i64,
+    w: i64,
+    h: i64,
+) -> Result<(u32, u32, u32, u32), String> {
+    match logical_geometry {
+        Some(geometry) => logical_crop_to_pixels(x, y, w, h, geometry, image_size),
+        None => Ok(visible_crop(x, y, w, h)),
+    }
+}
+
 pub fn screenshot_window(title: &str, output: &str) -> Result<String, String> {
     let mut conn = DbusConnection::connect()?;
 
     let (win_id, win_json) = desktop::find_window_by_title_with_conn(&mut conn, title)?
         .ok_or_else(|| format!("No window found matching '{}'", title))?;
 
-    desktop::raise_window_with_conn(&mut conn, win_id)?;
+    desktop::raise_window_with_conn(&mut conn, &win_id)?;
 
     std::thread::sleep(std::time::Duration::from_millis(300));
 
     // Get window details (x, y, width, height) for cropping
-    let details_json = desktop::window_details_with_conn(&mut conn, win_id)?;
+    let details_json = desktop::window_details_with_conn(&mut conn, &win_id)?;
     let win_x = crate::json::extract_json_number(&details_json, "x")
         .ok_or_else(|| "Window details missing 'x' field".to_string())?;
     let win_y = crate::json::extract_json_number(&details_json, "y")
@@ -53,14 +113,30 @@ pub fn screenshot_window(title: &str, output: &str) -> Result<String, String> {
     let win_h = crate::json::extract_json_number(&details_json, "height")
         .ok_or_else(|| "Window details missing 'height' field".to_string())?;
 
+    // Observe the KDE logical workspace before and after capture. If the
+    // topology changes while the portal is producing pixels, no coordinate
+    // transform can be trusted.
+    let geometry_before = desktop::screenshot_logical_geometry_with_conn(&mut conn)?;
+
     // Take full-screen screenshot
     let uri = take_portal_screenshot(&mut conn)?;
     let src_path = uri_to_path(&uri)?;
 
-    // Read, crop to the visible part of the window, and write the PNG
+    // Read, crop to the visible part of the window, and write the PNG.
     let full_img = crate::platform::png::read_png(&src_path)?;
     let _ = std::fs::remove_file(&src_path);
-    let (cx, cy, cw, ch) = visible_crop(win_x, win_y, win_w, win_h);
+    let geometry_after = desktop::screenshot_logical_geometry_with_conn(&mut conn)?;
+    if geometry_before != geometry_after {
+        return Err("Desktop layout changed during screenshot; retry the capture".to_string());
+    }
+    let (cx, cy, cw, ch) = window_crop(
+        geometry_after,
+        (full_img.width, full_img.height),
+        win_x,
+        win_y,
+        win_w,
+        win_h,
+    )?;
     let cropped = crate::platform::png::crop(&full_img, cx, cy, cw, ch)?;
     crate::platform::png::write_png(output, &cropped)?;
 
@@ -76,7 +152,7 @@ pub fn screenshot_window(title: &str, output: &str) -> Result<String, String> {
     ]))
 }
 
-pub fn screenshot_window_by_id(id: u64, output: &str) -> Result<String, String> {
+pub fn screenshot_window_by_id(id: &str, output: &str) -> Result<String, String> {
     let mut conn = DbusConnection::connect()?;
 
     // Raise the window first
@@ -95,14 +171,27 @@ pub fn screenshot_window_by_id(id: u64, output: &str) -> Result<String, String> 
     let win_h = crate::json::extract_json_number(&details_json, "height")
         .ok_or_else(|| "Window details missing 'height' field".to_string())?;
 
+    let geometry_before = desktop::screenshot_logical_geometry_with_conn(&mut conn)?;
+
     // Take full-screen screenshot via portal
     let uri = take_portal_screenshot(&mut conn)?;
     let src_path = uri_to_path(&uri)?;
 
-    // Read, crop to the visible part of the window, and write the PNG
+    // Read, crop to the visible part of the window, and write the PNG.
     let full_img = crate::platform::png::read_png(&src_path)?;
     let _ = std::fs::remove_file(&src_path);
-    let (cx, cy, cw, ch) = visible_crop(win_x, win_y, win_w, win_h);
+    let geometry_after = desktop::screenshot_logical_geometry_with_conn(&mut conn)?;
+    if geometry_before != geometry_after {
+        return Err("Desktop layout changed during screenshot; retry the capture".to_string());
+    }
+    let (cx, cy, cw, ch) = window_crop(
+        geometry_after,
+        (full_img.width, full_img.height),
+        win_x,
+        win_y,
+        win_w,
+        win_h,
+    )?;
     let cropped = crate::platform::png::crop(&full_img, cx, cy, cw, ch)?;
     crate::platform::png::write_png(output, &cropped)?;
 
@@ -241,6 +330,38 @@ fn url_decode(s: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_logical_crop_to_pixels_fractional_scale() {
+        assert_eq!(
+            logical_crop_to_pixels(2583, 0, 1257, 1440, (0, 0, 3840, 1440), (5760, 2160),).unwrap(),
+            (3875, 0, 1885, 2160)
+        );
+    }
+
+    #[test]
+    fn test_logical_crop_to_pixels_negative_virtual_origin() {
+        assert_eq!(
+            logical_crop_to_pixels(-1280, 0, 1280, 720, (-1280, 0, 3840, 1440), (5760, 2160),)
+                .unwrap(),
+            (0, 0, 1920, 1080)
+        );
+    }
+
+    #[test]
+    fn test_logical_crop_to_pixels_clips_offscreen_window() {
+        assert_eq!(
+            logical_crop_to_pixels(-100, 0, 200, 100, (0, 0, 3840, 1440), (5760, 2160),).unwrap(),
+            (0, 0, 150, 150)
+        );
+    }
+
+    #[test]
+    fn test_logical_crop_to_pixels_rejects_outside_window() {
+        assert!(
+            logical_crop_to_pixels(5000, 0, 200, 100, (0, 0, 3840, 1440), (5760, 2160),).is_err()
+        );
+    }
 
     #[test]
     fn test_url_decode_utf8() {

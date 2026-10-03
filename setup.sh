@@ -52,36 +52,47 @@ if [ "$OS" = "Linux" ]; then
         echo "User already in 'input' group."
     fi
 
-    # 2. GNOME window-calls extension
-    echo ""
-    echo "Installing window-calls GNOME extension..."
-    EXT_UUID="window-calls@domandoman.xyz"
-    if gnome-extensions list 2>/dev/null | grep -q "$EXT_UUID"; then
-        gnome-extensions enable "$EXT_UUID" 2>/dev/null
-        echo "window-calls extension already installed and enabled."
-    else
-        TMP_DIR="$(mktemp -d /tmp/window-calls-XXXXXX)"
-        echo "Downloading window-calls extension from GitHub..."
-        if curl -fsSL "https://github.com/ickyicky/window-calls/archive/refs/heads/main.tar.gz" -o "$TMP_DIR/ext.tar.gz" 2>/dev/null; then
-            tar -xzf "$TMP_DIR/ext.tar.gz" -C "$TMP_DIR"
-            EXT_SRC="$TMP_DIR/window-calls-main"
-            if [ -d "$EXT_SRC" ] && [ -f "$EXT_SRC/metadata.json" ]; then
-                (cd "$EXT_SRC" && zip -qr "$TMP_DIR/ext.zip" .)
-                if gnome-extensions install "$TMP_DIR/ext.zip" && gnome-extensions enable "$EXT_UUID" 2>/dev/null; then
-                    echo "window-calls extension installed and enabled."
+    # 2. Desktop-specific window integration
+    CURRENT_DESKTOP="${XDG_CURRENT_DESKTOP:-${XDG_SESSION_DESKTOP:-${DESKTOP_SESSION:-}}}"
+    if echo "$CURRENT_DESKTOP" | grep -Eqi '(^|:|;)KDE($|:|;)|plasma'; then
+        echo ""
+        echo "KDE Plasma detected. KWin scripting provides window management; no extension is needed."
+    elif echo "$CURRENT_DESKTOP" | grep -qi 'GNOME'; then
+        echo ""
+        echo "Installing window-calls GNOME extension..."
+        EXT_UUID="window-calls@domandoman.xyz"
+        if gnome-extensions list 2>/dev/null | grep -q "$EXT_UUID"; then
+            gnome-extensions enable "$EXT_UUID" 2>/dev/null
+            echo "window-calls extension already installed and enabled."
+        else
+            TMP_DIR="$(mktemp -d /tmp/window-calls-XXXXXX)"
+            echo "Downloading window-calls extension from GitHub..."
+            if curl -fsSL "https://github.com/ickyicky/window-calls/archive/refs/heads/main.tar.gz" -o "$TMP_DIR/ext.tar.gz" 2>/dev/null; then
+                tar -xzf "$TMP_DIR/ext.tar.gz" -C "$TMP_DIR"
+                EXT_SRC="$TMP_DIR/window-calls-main"
+                if [ -d "$EXT_SRC" ] && [ -f "$EXT_SRC/metadata.json" ]; then
+                    (cd "$EXT_SRC" && zip -qr "$TMP_DIR/ext.zip" .)
+                    if gnome-extensions install "$TMP_DIR/ext.zip" && gnome-extensions enable "$EXT_UUID" 2>/dev/null; then
+                        echo "window-calls extension installed and enabled."
+                    else
+                        echo "Failed to install extension. Try manually from:"
+                        echo "  https://github.com/ickyicky/window-calls"
+                    fi
                 else
-                    echo "Failed to install extension. Try manually from:"
+                    echo "Unexpected archive layout. Install manually from:"
                     echo "  https://github.com/ickyicky/window-calls"
                 fi
             else
-                echo "Unexpected archive layout. Install manually from:"
+                echo "Failed to download extension. Install manually from:"
                 echo "  https://github.com/ickyicky/window-calls"
             fi
-        else
-            echo "Failed to download extension. Install manually from:"
-            echo "  https://github.com/ickyicky/window-calls"
+            rm -rf "$TMP_DIR"
         fi
-        rm -rf "$TMP_DIR"
+
+    else
+        echo ""
+        echo "Non-GNOME Linux desktop detected; skipping the GNOME window-calls extension."
+        echo "Full-screen screenshots and input may still work, but window management requires a supported desktop backend."
     fi
 fi
 
