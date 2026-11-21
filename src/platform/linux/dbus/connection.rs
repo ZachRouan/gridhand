@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use super::auth;
 use super::message;
-use super::types::MarshalBuffer;
+use super::types::{MarshalBuffer, UnmarshalBuffer};
 
 /// Default deadline for a method call's reply. GNOME Shell and the portal
 /// answer in milliseconds; anything past this means the peer is wedged, and
@@ -165,8 +165,14 @@ impl DbusConnection {
         }
     }
 
+    /// Wait for an incoming method call matching path/interface/member.
+    ///
+    /// When `expected_sender` is set, calls from any other bus peer are
+    /// ignored, so an unrelated process on the session bus cannot inject a
+    /// result by calling the same method on our unique name.
     pub fn wait_for_method_call(
         &mut self,
+        expected_sender: Option<&str>,
         expected_path: &str,
         expected_interface: &str,
         expected_member: &str,
@@ -186,11 +192,29 @@ impl DbusConnection {
                 let path_match = reply.header.path.as_deref() == Some(expected_path);
                 let iface_match = reply.header.interface.as_deref() == Some(expected_interface);
                 let member_match = reply.header.member.as_deref() == Some(expected_member);
-                if path_match && iface_match && member_match {
+                let sender_match = expected_sender
+                    .is_none_or(|s| reply.header.sender.as_deref() == Some(s));
+                if path_match && iface_match && member_match && sender_match {
                     return Ok(reply);
                 }
             }
         }
+    }
+
+    /// Resolve a well-known bus name (e.g. `org.kde.KWin`) to the unique
+    /// connection name that currently owns it.
+    pub fn get_name_owner(&mut self, name: &str) -> Result<String, String> {
+        let mut body = MarshalBuffer::new();
+        body.write_string(name);
+        let reply = self.call_method(
+            "org.freedesktop.DBus",
+            "/org/freedesktop/DBus",
+            "org.freedesktop.DBus",
+            "GetNameOwner",
+            Some("s"),
+            &body.into_bytes(),
+        )?;
+        UnmarshalBuffer::new(&reply.body).read_string()
     }
 
     pub fn send_empty_method_return(&mut self, call: &Reply) -> Result<(), String> {
@@ -356,6 +380,48 @@ fn connect_session_bus() -> Result<UnixStream, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_wait_for_method_call_ignores_other_senders() {
+        // A spoofed call from an unrelated peer must be skipped; only the
+        // call from the expected sender is returned.
+        let (local, mut remote) = UnixStream::pair().unwrap();
+        let mut conn = DbusConnection {
+            stream: local,
+            serial: 0,
+            unique_name: ":1.10".to_string(),
+        };
+
+        let spoof = message::build_method_call_from_sender(1, ":1.99", "/bridge", "org.example.Bridge", "Report");
+        let real = message::build_method_call_from_sender(2, ":1.42", "/bridge", "org.example.Bridge", "Report");
+        remote.write_all(&spoof).unwrap();
+        remote.write_all(&real).unwrap();
+
+        let call = conn
+            .wait_for_method_call(Some(":1.42"), "/bridge", "org.example.Bridge", "Report", 1_000)
+            .unwrap();
+        assert_eq!(call.header.sender.as_deref(), Some(":1.42"));
+        assert_eq!(call.header.serial, 2);
+    }
+
+    #[test]
+    fn test_wait_for_method_call_times_out_when_only_spoofed_calls_arrive() {
+        let (local, mut remote) = UnixStream::pair().unwrap();
+        let mut conn = DbusConnection {
+            stream: local,
+            serial: 0,
+            unique_name: ":1.10".to_string(),
+        };
+
+        let spoof = message::build_method_call_from_sender(1, ":1.99", "/bridge", "org.example.Bridge", "Report");
+        remote.write_all(&spoof).unwrap();
+
+        let err = conn
+            .wait_for_method_call(Some(":1.42"), "/bridge", "org.example.Bridge", "Report", 300)
+            .err()
+            .expect("spoofed call must not be accepted");
+        assert!(err.contains("Timeout"), "got: {}", err);
+    }
 
     #[test]
     fn test_call_method_times_out_on_silent_peer() {

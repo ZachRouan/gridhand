@@ -320,6 +320,34 @@ fn skip_value(data: &[u8], mut pos: usize, sig: &str, depth: u8) -> Result<usize
     Ok(pos)
 }
 
+/// Build a METHOD_CALL as the bus daemon would deliver it, with the SENDER
+/// header filled in. Test-only: real senders are stamped by the bus.
+#[cfg(test)]
+pub fn build_method_call_from_sender(
+    serial: u32,
+    sender: &str,
+    path: &str,
+    interface: &str,
+    member: &str,
+) -> Vec<u8> {
+    let mut fields = MarshalBuffer::new();
+    write_header_field(&mut fields, FIELD_PATH, "o", |buf| buf.write_object_path(path));
+    write_header_field(&mut fields, FIELD_INTERFACE, "s", |buf| buf.write_string(interface));
+    write_header_field(&mut fields, FIELD_MEMBER, "s", |buf| buf.write_string(member));
+    write_header_field(&mut fields, FIELD_SENDER, "s", |buf| buf.write_string(sender));
+    let fields_bytes = fields.into_bytes();
+
+    let mut msg = vec![b'l', METHOD_CALL, 0, PROTOCOL_VERSION];
+    msg.extend_from_slice(&0u32.to_le_bytes());
+    msg.extend_from_slice(&serial.to_le_bytes());
+    msg.extend_from_slice(&(fields_bytes.len() as u32).to_le_bytes());
+    msg.extend_from_slice(&fields_bytes);
+    while !msg.len().is_multiple_of(8) {
+        msg.push(0);
+    }
+    msg
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

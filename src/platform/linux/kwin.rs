@@ -100,6 +100,8 @@ fn unload_script(conn: &mut DbusConnection, plugin_name: &str) {
 }
 
 fn run_script(conn: &mut DbusConnection, source: &str) -> Result<String, String> {
+    // Only accept the callback from the process that owns org.kde.KWin.
+    let kwin_owner = conn.get_name_owner(KWIN_DEST)?;
     let source = format!("{}{}", bridge_prelude(conn), source);
     let script = TempScript::create(&source)?;
 
@@ -130,6 +132,7 @@ fn run_script(conn: &mut DbusConnection, source: &str) -> Result<String, String>
 
     let result = (|| {
         let call = conn.wait_for_method_call(
+            Some(&kwin_owner),
             BRIDGE_PATH,
             BRIDGE_IFACE,
             BRIDGE_MEMBER,
@@ -215,9 +218,9 @@ pub fn find_window_by_title_with_conn(
     let needle = title.to_lowercase();
 
     for window in json::split_json_array(&windows_json) {
+        // Title-only, matching the GNOME backend's --window semantics.
         let caption = json::extract_json_string(window, "title").unwrap_or_default();
-        let app = json::extract_json_string(window, "wm_class").unwrap_or_default();
-        if caption.to_lowercase().contains(&needle) || app.to_lowercase().contains(&needle) {
+        if caption.to_lowercase().contains(&needle) {
             let id = json::extract_json_string(window, "id")
                 .ok_or("KWin window entry missing string id")?;
             return Ok(Some((id, window.to_string())));
@@ -250,7 +253,12 @@ fn raise_window_script(id: &str) -> String {
     for (var i = 0; i < list.length; i++) {{
         var w = list[i];
         if (String(w.internalId || w.windowId || "") === target) {{
-            workspace.activeWindow = w;
+            // Plasma 6 exposes activeWindow; Plasma 5 used activeClient.
+            if (typeof workspace.activeWindow !== "undefined") {{
+                workspace.activeWindow = w;
+            }} else {{
+                workspace.activeClient = w;
+            }}
             found = true;
             break;
         }}
@@ -342,5 +350,6 @@ mod tests {
         let script = raise_window_script("{ab\"c\\d}");
         assert!(script.contains(r#"var target = "{ab\"c\\d}";"#));
         assert!(script.contains("workspace.activeWindow = w"));
+        assert!(script.contains("workspace.activeClient = w"));
     }
 }
