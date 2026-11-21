@@ -169,15 +169,14 @@ fn parse_mode(s: &str) -> Option<(i32, i32)> {
     Some((w.trim().parse().ok()?, h.trim().parse().ok()?))
 }
 
-/// Detect total screen dimensions. Tries Mutter's DisplayConfig first (the
-/// compositor's own logical layout — correct for mirrored/rotated/stacked
-/// monitors and fractional scale), then falls back to the DRM-sysfs
-/// heuristic below for non-GNOME desktops, then to framebuffer
-/// virtual_size, then to 1920x1080.
+/// Detect total screen dimensions. Tries the current desktop backend's
+/// compositor-reported logical layout first (Mutter on GNOME, KWin on KDE),
+/// then falls back to the DRM-sysfs heuristic, framebuffer virtual_size,
+/// and finally 1920x1080.
 ///
 /// Cached in a `OnceLock`: every mouse `UinputDevice::create` call re-detects
 /// the screen size, and each detection is an uncached D-Bus connect plus a
-/// Mutter GetCurrentState round trip. A `mouse click --cell` now uses one
+/// compositor geometry round trip. A `mouse click --cell` now uses one
 /// device, but caching still bounds a wedged/slow shell to at most one
 /// method-timeout stall per process, however many devices get created.
 fn detect_screen_size() -> (i32, i32) {

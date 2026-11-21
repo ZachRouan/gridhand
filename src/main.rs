@@ -41,7 +41,7 @@ USAGE:
 COMMANDS:
     screenshot [options]            Take a screenshot
         --window <title>            Screenshot a specific window (by title substring)
-        --window-id <id>            Screenshot a specific window (by numeric ID)
+        --window-id <id>            Screenshot a specific window (by ID)
         --grid [WxH]                Overlay a labeled grid (default: auto-scaled)
         --cell <ref>                Crop to a grid cell (B2.C1 zoom, D3+E3 between cells)
         --output <path>             Output file path
@@ -113,7 +113,7 @@ fn main() {
 /// cache key identifying screenshots captured from it.
 #[derive(Debug)]
 struct WindowTarget {
-    id: u64,
+    id: String,
     x: i32,
     y: i32,
     w: u32,
@@ -128,7 +128,7 @@ struct WindowTarget {
 #[derive(Debug, PartialEq)]
 struct WindowSpec {
     title: Option<String>,
-    id: Option<u64>,
+    id: Option<String>,
 }
 
 /// Pre-parse args to extract --window and --window-id flags. Pure
@@ -139,7 +139,7 @@ struct WindowSpec {
 fn scan_window_flags(args: &[String]) -> Result<(Vec<String>, Option<WindowSpec>), String> {
     let mut remaining = Vec::new();
     let mut window_title: Option<String> = None;
-    let mut window_id: Option<u64> = None;
+    let mut window_id: Option<String> = None;
     let mut i = 0;
     let mut literal = false;
 
@@ -163,12 +163,14 @@ fn scan_window_flags(args: &[String]) -> Result<(Vec<String>, Option<WindowSpec>
             }
             "--window-id" => {
                 i += 1;
-                let id_str = args.get(i)
-                    .ok_or("--window-id requires a numeric ID argument")?;
-                window_id = Some(
-                    id_str.parse::<u64>()
-                        .map_err(|_| format!("Invalid window ID: {}", id_str))?,
-                );
+                let id = args
+                    .get(i)
+                    .ok_or("--window-id requires an ID argument")?
+                    .clone();
+                if id.is_empty() {
+                    return Err("Window ID cannot be empty".to_string());
+                }
+                window_id = Some(id);
             }
             _ => {
                 remaining.push(args[i].clone());
@@ -198,13 +200,15 @@ fn resolve_and_raise(spec: &WindowSpec) -> Result<WindowTarget, String> {
             .ok_or_else(|| format!("No window found matching '{}'", title))?;
         id
     } else {
-        spec.id.ok_or("WindowSpec has neither title nor id")?
+        spec.id
+            .clone()
+            .ok_or("WindowSpec has neither title nor id")?
     };
 
-    platform::raise_window(id)?;
+    platform::raise_window(&id)?;
     std::thread::sleep(std::time::Duration::from_millis(200));
-    let (x, y, w, h) = platform::get_window_bounds(id)?;
-    let cache_key = cache_target_key(&spec.title, spec.id);
+    let (x, y, w, h) = platform::get_window_bounds(&id)?;
+    let cache_key = cache_target_key(&spec.title, spec.id.as_deref());
     Ok(WindowTarget { id, x, y, w, h, cache_key })
 }
 
@@ -217,7 +221,7 @@ fn click_reference_dims(target: &WindowTarget) -> (u32, u32) {
         && let Ok(dims) = platform::png::read_png_dimensions(&cache_path()) {
             return dims;
     }
-    if platform::screenshot_window_by_id(target.id, &cache_path()).is_ok()
+    if platform::screenshot_window_by_id(&target.id, &cache_path()).is_ok()
         && let Ok(dims) = platform::png::read_png_dimensions(&cache_path()) {
             let _ = std::fs::write(cache_meta_path(), &target.cache_key);
             return dims;
@@ -233,7 +237,7 @@ fn cache_meta_path() -> String {
 /// Identity of a capture target. The cache is only reusable for the exact
 /// target it was captured from — otherwise `--cell` would silently crop a
 /// different window's image (or a full-screen shot) and report success.
-fn cache_target_key(window_title: &Option<String>, window_id: Option<u64>) -> String {
+fn cache_target_key(window_title: &Option<String>, window_id: Option<&str>) -> String {
     if let Some(title) = window_title {
         format!("title:{}", title)
     } else if let Some(id) = window_id {
@@ -277,7 +281,7 @@ fn write_cache(output: &str, target_key: &str) {
 fn cmd_screenshot(args: &[String]) -> Result<String, String> {
     let mut output_path: Option<String> = None;
     let mut window_title: Option<String> = None;
-    let mut window_id: Option<u64> = None;
+    let mut window_id: Option<String> = None;
     let mut grid_enabled = false;
     let mut grid: Option<(u32, u32)> = None;
     let mut cell: Option<String> = None;
@@ -293,8 +297,14 @@ fn cmd_screenshot(args: &[String]) -> Result<String, String> {
             }
             "--window-id" => {
                 i += 1;
-                let id_str = args.get(i).ok_or("--window-id requires a numeric ID argument")?;
-                window_id = Some(id_str.parse::<u64>().map_err(|_| format!("Invalid window ID: {}", id_str))?);
+                let id = args
+                    .get(i)
+                    .ok_or("--window-id requires an ID argument")?
+                    .clone();
+                if id.is_empty() {
+                    return Err("Window ID cannot be empty".to_string());
+                }
+                window_id = Some(id);
             }
             "--output" => {
                 i += 1;
@@ -332,7 +342,7 @@ fn cmd_screenshot(args: &[String]) -> Result<String, String> {
     // was captured from the same target this command names. A fresh capture of
     // the requested target is always correct; a cached image of a different
     // target never is.
-    let target_key = cache_target_key(&window_title, window_id);
+    let target_key = cache_target_key(&window_title, window_id.as_deref());
     let use_cache = cell.is_some() && cache_is_fresh(&target_key);
 
     let result = if use_cache {
@@ -342,7 +352,7 @@ fn cmd_screenshot(args: &[String]) -> Result<String, String> {
         let r = platform::screenshot_window(title, output)?;
         write_cache(output, &target_key);
         r
-    } else if let Some(id) = window_id {
+    } else if let Some(id) = &window_id {
         let r = platform::screenshot_window_by_id(id, output)?;
         write_cache(output, &target_key);
         r
@@ -489,10 +499,7 @@ fn cmd_windows(args: &[String]) -> Result<String, String> {
     match args[0].as_str() {
         "list" => platform::list_windows(),
         "raise" => {
-            let id: u64 = args.get(1)
-                .ok_or("Usage: gridhand windows raise <id>")?
-                .parse()
-                .map_err(|_| "Invalid window ID")?;
+            let id = args.get(1).ok_or("Usage: gridhand windows raise <id>")?;
             let result = platform::raise_window(id);
             // Raising changes what's on screen; a cached shot no longer matches.
             invalidate_cache();
@@ -642,11 +649,16 @@ mod tests {
     }
 
     #[test]
-    fn test_window_id_invalid_number() {
-        let args: Vec<String> = vec!["--window-id".to_string(), "notanumber".to_string()];
-        let result = scan_window_flags(&args);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Invalid window ID"));
+    fn test_window_id_accepts_opaque_id() {
+        let args: Vec<String> = vec!["--window-id".to_string(), "{abc-def}".to_string()];
+        let (_, spec) = scan_window_flags(&args).unwrap();
+        assert_eq!(
+            spec,
+            Some(WindowSpec {
+                title: None,
+                id: Some("{abc-def}".to_string())
+            })
+        );
     }
 
     #[test]
@@ -672,7 +684,13 @@ mod tests {
         ];
         let (remaining, spec) = scan_window_flags(&args).unwrap();
         assert_eq!(remaining, vec!["--cell".to_string(), "B2".to_string()]);
-        assert_eq!(spec, Some(WindowSpec { title: None, id: Some(42) }));
+        assert_eq!(
+            spec,
+            Some(WindowSpec {
+                title: None,
+                id: Some("42".to_string())
+            })
+        );
     }
 
     #[test]
@@ -698,7 +716,13 @@ mod tests {
         ];
         let (remaining, spec) = scan_window_flags(&args).unwrap();
         assert_eq!(remaining, vec!["--window-id".to_string(), "9".to_string()]);
-        assert_eq!(spec, Some(WindowSpec { title: None, id: Some(7) }));
+        assert_eq!(
+            spec,
+            Some(WindowSpec {
+                title: None,
+                id: Some("7".to_string())
+            })
+        );
     }
 
     #[test]
@@ -724,13 +748,22 @@ mod tests {
 
     #[test]
     fn test_cache_target_keys_distinct() {
-        assert_ne!(cache_target_key(&None, None), cache_target_key(&None, Some(1)));
-        assert_ne!(cache_target_key(&Some("Firefox".to_string()), None), cache_target_key(&None, None));
+        assert_ne!(
+            cache_target_key(&None, None),
+            cache_target_key(&None, Some("1"))
+        );
+        assert_ne!(
+            cache_target_key(&Some("Firefox".to_string()), None),
+            cache_target_key(&None, None)
+        );
         assert_ne!(
             cache_target_key(&Some("Firefox".to_string()), None),
             cache_target_key(&Some("Terminal".to_string()), None)
         );
-        assert_eq!(cache_target_key(&None, Some(7)), cache_target_key(&None, Some(7)));
+        assert_eq!(
+            cache_target_key(&None, Some("7")),
+            cache_target_key(&None, Some("7"))
+        );
     }
 
     #[test]

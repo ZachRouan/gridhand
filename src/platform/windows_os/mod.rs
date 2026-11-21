@@ -3,6 +3,11 @@ mod input;
 mod screenshot;
 mod windows;
 
+fn parse_window_id(id: &str) -> Result<u64, String> {
+    id.parse::<u64>()
+        .map_err(|_| format!("Invalid numeric window ID: {}", id))
+}
+
 /// Opt in to DPI awareness once per process. Without it, on scaled displays
 /// (the 125/150% laptop default) GDI captures are DWM-virtualized and
 /// blurry, and window metrics come back in scaled units.
@@ -48,19 +53,19 @@ pub fn screenshot_window(title: &str, output: &str) -> Result<String, String> {
     screenshot::screenshot_window(title, output)
 }
 
-pub fn screenshot_window_by_id(id: u64, output: &str) -> Result<String, String> {
+pub fn screenshot_window_by_id(id: &str, output: &str) -> Result<String, String> {
     ensure_dpi_aware();
-    screenshot::screenshot_window_by_id(id, output)
+    screenshot::screenshot_window_by_id(parse_window_id(id)?, output)
 }
 
-pub fn find_window_by_title(title: &str) -> Result<Option<(u64, String)>, String> {
+pub fn find_window_by_title(title: &str) -> Result<Option<(String, String)>, String> {
     ensure_dpi_aware();
-    windows::find_window_by_title(title)
+    windows::find_window_by_title(title).map(|opt| opt.map(|(id, json)| (id.to_string(), json)))
 }
 
-pub fn get_window_bounds(id: u64) -> Result<(i32, i32, u32, u32), String> {
+pub fn get_window_bounds(id: &str) -> Result<(i32, i32, u32, u32), String> {
     ensure_dpi_aware();
-    let rect = windows::get_window_rect(id)?;
+    let rect = windows::get_window_rect(parse_window_id(id)?)?;
     Ok((
         rect.left,
         rect.top,
@@ -74,9 +79,9 @@ pub fn list_windows() -> Result<String, String> {
     windows::list_windows()
 }
 
-pub fn raise_window(id: u64) -> Result<String, String> {
+pub fn raise_window(id: &str) -> Result<String, String> {
     ensure_dpi_aware();
-    windows::raise_window(id)
+    windows::raise_window(parse_window_id(id)?)
 }
 
 pub fn mouse_move(x: i32, y: i32) -> Result<String, String> {
